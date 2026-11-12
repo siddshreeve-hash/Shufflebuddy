@@ -43,9 +43,10 @@ public:
     juce::int64 startedAt() const { return started; }
 
     void trigger (int p, float vel, float tuneSemis, float decay, float level, const SampleData* sample,
-                  float sr, juce::int64 now, juce::uint32 seed)
+                  float sr, juce::int64 now, juce::uint32 seed, float echoSend = 0.0f, float spaceSend = 0.0f)
     {
         padId = p; on = true; started = now; fs = sr; t = 0;
+        sendE = echoSend; sendS = spaceSend;
         v = juce::jlimit (0.0f, 1.0f, vel);
         bright = 0.55f + 0.45f * v;
         gain = level;
@@ -86,7 +87,8 @@ public:
 
     void choke() { if (on) { ampC = juce::jmin (ampC, std::exp (-1.0f / (0.008f * fs))); noiseC = ampC; } }
 
-    void render (float* L, float* R, int start, int num)
+    // dry into L/R, plus per-pad sends into the echo and space buses
+    void render (float* L, float* R, float* EL, float* ER, float* SL, float* SR, int start, int num)
     {
         if (! on) return;
         for (int i = start; i < start + num; ++i)
@@ -94,8 +96,10 @@ public:
             const float s = smp != nullptr ? nextSample() : nextSynth();
             lpState += (s - lpState) * ghostLp;
             const float o = lpState * gain * v;
-            L[i] += o * panL;
-            R[i] += o * panR;
+            const float l = o * panL, r = o * panR;
+            L[i] += l; R[i] += r;
+            EL[i] += l * sendE; ER[i] += r * sendE;
+            SL[i] += l * sendS; SR[i] += r * sendS;
             if (amp < 0.0005f && noiseAmp < 0.0005f && t > 64) { on = false; break; }
         }
     }
@@ -218,6 +222,7 @@ private:
     juce::int64 started = 0;
     float fs = 48000.0f, v = 1.0f, bright = 1.0f, gain = 1.0f, tune = 1.0f, dec = 0.5f;
     float amp = 1.0f, ampC = 0.999f, noiseAmp = 1.0f, noiseC = 0.999f, pitchEnv = 1.0f, pitchC = 0.99f;
+    float sendE = 0.0f, sendS = 0.0f;
     float ghostLp = 1.0f, lpState = 0.0f, hpState = 0.0f, hpIn = 0.0f, panL = 1.0f, panR = 1.0f;
     juce::int64 t = 0;
     std::array<double, 6> phases {};

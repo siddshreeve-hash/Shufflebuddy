@@ -14,6 +14,7 @@ int main (int argc, char** argv)
     int fillBar = -1;
     std::vector<std::pair<juce::String, juce::String>> kv;
     for (int i = 3; i < argc; ++i) { juce::String a (argv[i]); kv.push_back ({ a.upToFirstOccurrenceOf ("=", false, false), a.fromFirstOccurrenceOf ("=", false, false) }); }
+    int throwBar = -1, sweepBar = -1; double tailSec = 1.0;
     for (auto& [k, v] : kv) if (k == "style") proc.applyStyleFeel (v.getIntValue());
     for (auto& [k, v] : kv)
     {
@@ -21,28 +22,34 @@ int main (int argc, char** argv)
         else if (k == "roll") { juce::Random r (v.getLargeIntValue()); proc.setGrid (proc.currentSlot(), groove::roll ((int) proc.apvts.getRawParameterValue ("style")->load(), r)); }
         else if (k == "straight") { set ("swing", 50); set ("loosen", 0); set ("ghosts", 0); set ("variety", 0); for (int p = 0; p < NumPads; ++p) set (ShuffleBuddyProcessor::pid ("push", p), 0); }
         else if (k == "fillbar") fillBar = v.getIntValue();
+        else if (k == "throwbar") throwBar = v.getIntValue();
+        else if (k == "sweepbar") sweepBar = v.getIntValue();
+        else if (k == "tail") tailSec = v.getDoubleValue();
         else if (k == "grid" && v.length() == NumPads * 16)
             for (int i = 0; i < v.length(); ++i) proc.setCell (proc.currentSlot(), i / 16, i % 16, (juce::uint8) (v[i] - '0'));
-        else if (k != "style" && k != "log") set (k, v.getFloatValue());
+        else if (k != "style" && k != "log" && k != "chainlog") set (k, v.getFloatValue());
     }
     set ("play", 1);
     proc.prepareToPlay (sr, bs);
     const double bpm = proc.apvts.getRawParameterValue ("tempo")->load();
     const double barLen = sr * 60.0 / bpm * 4.0;
-    const int total = (int) (barLen * bars + sr * 1.0);
+    const int total = (int) (barLen * bars + sr * tailSec);
     juce::AudioBuffer<float> out (2, total), blk (2, bs);
     bool logBars = false; for (auto& [k, v] : kv) if (k == "log") logBars = true;
     std::array<int, NumPads> lastHits {}; int lastBar = 0;
     for (int pos = 0; pos < total; pos += bs)
     {
         if (fillBar >= 0) set ("fill", pos >= barLen * fillBar && pos < barLen * (fillBar + 1) ? 1.0f : 0.0f);
+        if (throwBar >= 0) set ("throw", pos >= barLen * throwBar && pos < barLen * throwBar + barLen * 0.5 ? 1.0f : 0.0f);
+        if (sweepBar >= 0 && pos >= barLen * sweepBar && pos < barLen * (sweepBar + 2)) { const double t = (pos - barLen * sweepBar) / (barLen * 2); set ("fxfilter", (float) (t < 0.5 ? -t * 1.8 : (t - 0.5) * 1.8)); }
+        else if (sweepBar >= 0) set ("fxfilter", 0.0f);
         if (pos >= barLen * bars) set ("play", 0);
         juce::MidiBuffer m; proc.processBlock (blk, m);
         if (logBars && (int) (pos / barLen) != lastBar)
         {
             std::cout << "bar " << lastBar + 1 << ":";
             for (int p = 0; p < NumPads; ++p) { std::cout << " " << ShuffleBuddyProcessor::padName (p) << "=" << proc.padHits (p) - lastHits[(size_t) p]; lastHits[(size_t) p] = proc.padHits (p); }
-            std::cout << "\n"; lastBar = (int) (pos / barLen);
+            std::cout << "  slot " << proc.playingSlot() << "  GR " << proc.squashGR() << "dB\n"; lastBar = (int) (pos / barLen);
         }
         for (int c = 0; c < 2; ++c) out.copyFrom (c, pos, blk, c, 0, juce::jmin (bs, total - pos));
     }
