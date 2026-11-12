@@ -80,8 +80,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShuffleBuddyProcessor::creat
         add (new APF ({ pid ("decay", i), 1 }, n + " decay", NR (0.0f, 1.0f), 0.45f, fmt (pct)));
         add (new APF ({ pid ("push", i), 1 }, n + " push", NR (-20.0f, 30.0f, 0.5f), 0.0f,
                       fmt ([] (float x) { return (x > 0 ? "+" : "") + juce::String (juce::roundToInt (x)) + "ms"; })));
-        static const float eDef[NumPads] = { 0.0f, 0.35f, 0.3f, 0.45f, 0.05f, 0.1f, 0.4f, 0.0f };
-        static const float sDef[NumPads] = { 0.0f, 0.3f, 0.35f, 0.2f, 0.1f, 0.2f, 0.25f, 0.1f };
+        static const float eDef[NumPads] = { 0.0f, 0.12f, 0.12f, 0.4f, 0.05f, 0.1f, 0.35f, 0.0f };
+        static const float sDef[NumPads] = { 0.0f, 0.1f, 0.18f, 0.2f, 0.08f, 0.15f, 0.2f, 0.08f };
         add (new APF ({ pid ("esend", i), 1 }, n + " echo send", NR (0.0f, 1.0f), eDef[i], fmt (pct)));
         add (new APF ({ pid ("ssend", i), 1 }, n + " space send", NR (0.0f, 1.0f), sDef[i], fmt (pct)));
     }
@@ -113,6 +113,8 @@ ShuffleBuddyProcessor::ShuffleBuddyProcessor()
         padRoom[(size_t) i]  = apvts.getRawParameterValue (pid ("room", i));
     }
     for (auto& c : ccMap) c.store (-1);
+    for (auto& r : played) for (auto& c : r) c.store (0);
+    for (auto& r : playedSrc) for (auto& c : r) c.store (0);
     // starter patterns: one per style, so it grooves the moment you press play
     juce::Random seed (2026);
     for (int s = 0; s < groove::numSlots; ++s) setGrid (s, groove::roll (s, seed));
@@ -434,26 +436,56 @@ void ShuffleBuddyProcessor::trigger (int pad, float vel)
     hitCount[i].fetch_add (1);
 }
 
+void ShuffleBuddyProcessor::markDiff (const groove::Grid& before, juce::uint8 source)
+{
+    for (int pd = 0; pd < NumPads; ++pd)
+        for (int s = 0; s < groove::numSteps; ++s)
+        {
+            const auto a = before[(size_t) pd][(size_t) s], b = barGrid[(size_t) pd][(size_t) s];
+            if (a == b) continue;
+            srcTmp[(size_t) pd][(size_t) s] = b == 0 ? (juce::uint8) Dropped : source;
+        }
+}
+
+void ShuffleBuddyProcessor::publishBar()
+{
+    for (int pd = 0; pd < NumPads; ++pd)
+        for (int s = 0; s < groove::numSteps; ++s)
+        {
+            played[(size_t) pd][(size_t) s].store (barGrid[(size_t) pd][(size_t) s]);
+            playedSrc[(size_t) pd][(size_t) s].store (srcTmp[(size_t) pd][(size_t) s]);
+        }
+    playedSlotNow.store (activeSlot);
+}
+
 void ShuffleBuddyProcessor::prepareBar (juce::int64 bar)
 {
-    // this bar's playing copy: stored pattern + per-bar variety + auto ghosts + fill
+    // this bar's playing copy: stored pattern + per-bar variety + auto ghosts + fill (each change is tagged for the grid)
     barGrid = grid (activeSlot);
+    for (auto& r : srcTmp) r.fill (FromPattern);
     const float variety = p ("variety"), ghosts = p ("ghosts");
     const int style = (int) p ("style");
     if (variety > 0.0f && bar > 0)
     {
+        const auto before = barGrid;
         const int moves = (int) std::floor (variety * 4.0f + rng.nextFloat());
         groove::vary (barGrid, style, rng, moves);
         if (variety > 0.4f && (bar % 4) == 3 && rng.nextFloat() < variety)   // end of a 4-bar phrase: little lift
             for (int s = 12; s < 16; ++s) if (barGrid[Snare][(size_t) s] == 0 && rng.nextFloat() < 0.5f) barGrid[Snare][(size_t) s] = 1;
+        markDiff (before, FromVariety);
     }
     if (ghosts > 0.25f)   // auto ghosts: quiet snare/hat notes in the gaps, on the off 16ths
+    {
+        const auto before = barGrid;
         for (int s = 1; s < 16; s += 2)
         {
             if (barGrid[Snare][(size_t) s] == 0 && rng.nextFloat() < (ghosts - 0.25f) * 0.4f) barGrid[Snare][(size_t) s] = 1;
             if (barGrid[Hat][(size_t) s] == 0 && barGrid[OpenHat][(size_t) s] == 0 && rng.nextFloat() < (ghosts - 0.25f) * 0.6f) barGrid[Hat][(size_t) s] = 1;
         }
-    if (p ("fill") > 0.5f) groove::fill (barGrid, rng);
+        markDiff (before, FromGhosts);
+    }
+    if (p ("fill") > 0.5f) { const auto before = barGrid; groove::fill (barGrid, rng); markDiff (before, FromFill); }
+    publishBar();
 }
 
 void ShuffleBuddyProcessor::scheduleStep (juce::int64 step, juce::int64 at, double sps)
@@ -471,7 +503,10 @@ void ShuffleBuddyProcessor::scheduleStep (juce::int64 step, juce::int64 at, doub
     }
     else if (s == 8 && ! fillApplied && p ("fill") > 0.5f)   // FILL pressed during the bar: fill its second half
     {
+        const auto before = barGrid;
         groove::fill (barGrid, rng);
+        markDiff (before, FromFill);
+        publishBar();
         fillApplied = true;
     }
     const float sr = (float) getSampleRate();

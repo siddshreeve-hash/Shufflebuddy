@@ -38,7 +38,7 @@ int main (int argc, char** argv)
     const char* sounds[] = { "", "Fat Snare", "Room Clap", "Dusty Rim", "Real Closed Hat", "Dusty Open Hat", "Foley Knock", "Rattle" };
     for (int p = 1; p < NumPads; ++p) setP (ShuffleBuddyProcessor::pid ("snd", p), (float) sounds::find (sounds[p]));
     proc.applyKickPreset (0);   // Garage Thud
-    const float lv[] = { 0.85f, 0.8f, 0.55f, 0.6f, 0.7f, 0.55f, 0.65f, 0.4f };
+    const float lv[] = { 0.85f, 0.6f, 0.42f, 0.6f, 0.72f, 0.55f, 0.65f, 0.42f };
     for (int p = 0; p < NumPads; ++p) setP (ShuffleBuddyProcessor::pid ("lvl", p), lv[p]);
     // ---- the 4-bar phrase
     proc.setGrid (0, parseGrid ({ "3.........2.....", "....3.......3...", "....2.......2...", "...1...1..1...1.",
@@ -49,9 +49,10 @@ int main (int argc, char** argv)
                                   "1.2.1.2.1.2.1.2.", "..............2.", ".......1.....1..", "1111111111111111" }));
     proc.setGrid (3, parseGrid ({ "3.........2...2.", "....3....1..3.21", "....2.......3...", "..1..1....1.1...",
                                   "1.2.1.2.1.2.2222", "..2...........2.", ".......1..1.....", "1111111111111111" }));
-    setP ("tempo", 134); setP ("swing", 57); setP ("ghosts", 0.45f); setP ("loosen", 0.2f); setP ("variety", 0.35f);
-    setP ("dust", 0.3f); setP ("squash", 0.45f); setP ("echo", 0.3f); setP ("space", 0.3f); setP ("echotime", 2);
-    setP ("fxfilter", -0.85f); setP ("chain", 0); setP ("slot", 0); setP ("play", 1);
+    // start from the bare pattern: straight, nothing added, then switch the groove tools on one at a time
+    setP ("tempo", 134); setP ("swing", 50); setP ("ghosts", 0.0f); setP ("loosen", 0.0f); setP ("variety", 0.0f);
+    setP ("dust", 0.25f); setP ("squash", 0.4f); setP ("echo", 0.25f); setP ("space", 0.25f); setP ("echotime", 2);
+    setP ("fxfilter", 0.0f); setP ("chain", 0); setP ("slot", 0); setP ("play", 1);
     proc.prepareToPlay (sr, 160);
 
     std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
@@ -62,25 +63,21 @@ int main (int argc, char** argv)
     enum Kind { Drag, Hold, Click };
     struct Act { double b0, b1; Kind kind; juce::String target, label; float v0 = 0, v1 = 0; bool done = false; };
     std::vector<Act> acts = {
-        { 1.4, 6.0, Drag, "fxfilter", "FILTER OPEN", -0.85f, 0.0f },
-        { 6.6, 6.7, Click, "CHAIN", "CHAIN A-B" },
-        { 7.2, 7.3, Click, "A-B", "CHAIN A-B-C-D" },
-        { 9.0, 11.0, Drag, "swing", "MORE SWING", 57.0f, 62.0f },
-        { 13.0, 14.0, Drag, "swing", "SWING BACK", 62.0f, 58.0f },
-        { 15.0, 15.1, Click, "KICK LAB", "KICK LAB" },
-        { 16.0, 18.0, Drag, "kdrive", "KICK DRIVE", 0.25f, 0.62f },
-        { 18.5, 20.0, Drag, "krumble", "RUMBLE", 0.0f, 0.4f },
-        { 20.5, 20.6, Click, "GRID", "BACK TO GRID" },
-        { 21.0, 22.8, Drag, "echo", "ECHO UP", 0.3f, 0.6f },
-        { 23.5, 24.0, Hold, "throw", "THROW!" },
-        { 24.3, 24.9, Drag, "echo", "ECHO DOWN", 0.6f, 0.3f },
-        { 25.4, 25.5, Click, "VARY", "VARY PATTERN A" },
-        { 26.4, 28.0, Drag, "ghosts", "MORE GHOSTS", 0.45f, 0.72f },
-        { 28.45, 29.0, Hold, "FILL", "FILL" },
-        { 29.6, 31.4, Drag, "fxfilter", "BUILD", 0.0f, 0.65f },
-        { 31.5, 32.0, Hold, "throw", "THROW!" },
+        { 4.3, 6.6, Drag, "swing", "SWING 50% > 62%", 50.0f, 62.0f },
+        { 8.3, 9.8, Drag, "ghosts", "GHOSTS 0% > 85%", 0.0f, 0.85f },
+        { 11.6, 11.95, Drag, "ghosts", "GHOSTS > 40%", 0.85f, 0.4f },
+        { 12.3, 13.8, Drag, "variety", "VARIETY 0% > 75%", 0.0f, 0.75f },
+        { 17.35, 17.95, Hold, "FILL", "HOLD FILL" },
+        { 19.35, 19.95, Hold, "FILL", "HOLD FILL" },
+        { 20.3, 21.6, Drag, "loosen", "LOOSEN 0% > 55%", 0.0f, 0.55f },
+        { 23.6, 23.7, Click, "CHAIN", "CHAIN A-B" },
+        { 23.85, 23.95, Click, "A-B", "CHAIN A-B-C-D" },
+        { 28.2, 29.3, Drag, "echo", "ECHO UP", 0.25f, 0.5f },
+        { 29.4, 29.95, Hold, "FILL", "HOLD FILL" },
+        { 31.4, 31.95, Hold, "throw", "THROW!" },
         { 32.05, 32.15, Click, "stop", "STOP" },
     };
+
     auto centreOf = [&] (const Act& a) -> juce::Point<float>
     {
         juce::Component* c = a.kind == Drag ? findById (ed.get(), a.target) : nullptr;
@@ -166,6 +163,36 @@ int main (int argc, char** argv)
         g.setColour (juce::Colours::black.withAlpha (0.3f)); g.fillPath (arrow, tr.translated (3, 4));
         g.setColour (juce::Colours::white); g.fillPath (arrow, tr);
         g.setColour (juce::Colour (0xff1f2333)); g.strokePath (arrow, juce::PathStrokeType (2.2f), tr);
+        // ---- the lesson strip under the machine
+        {
+            struct Cap { double b; const char* title; const char* text; };
+            static const Cap caps[] = {
+                { 0,  "1  THE PATTERN", "Pattern A exactly as programmed: straight timing, nothing added." },
+                { 4,  "2  SWING", "The off-beat 16ths lean late. Watch the grid lean right: 50% straight, 62% shuffle." },
+                { 8,  "3  GHOSTS", "Quiet snares and hats appear in the gaps (blue boxes). Different ones every bar." },
+                { 12, "4  VARIETY", "Every bar plays its own version: green = added, X = dropped. Your pattern is never changed." },
+                { 16, "5  FILL", "Hold FILL and the second half of the bar breaks into a fill (orange boxes)." },
+                { 20, "6  LOOSEN", "Human timing: hits drift a few ms early and late, velocities wobble. Listen to it relax." },
+                { 24, "7  CHAIN", "Patterns A, B, C, D play one bar each: a 4-bar phrase, still with ghosts + variety on top." },
+                { 28, "8  ALL TOGETHER", "Swing + ghosts + variety + fills + loosen + chain, then echo and a THROW to finish." },
+            };
+            int ci = 0; for (int i = 0; i < 8; ++i) if (b >= caps[i].b) ci = i;
+            const float top = (float) ed->getHeight();
+            const float fadeIn = (float) juce::jlimit (0.0, 1.0, (b - caps[ci].b) / 0.25);
+            g.setColour (juce::Colour (0xff1f2333)); g.fillRect (0.0f, top, (float) ed->getWidth(), 130.0f);
+            for (int i = 0; i < 8; ++i)   // progress: eight lessons
+            {
+                const float x = 40.0f + (float) i * 150.0f;
+                g.setColour (i < ci ? juce::Colour (0xffffd23f) : i == ci ? juce::Colour (0xffff7a1a) : juce::Colour (0xff3a4566));
+                g.fillRoundedRectangle (x, top + 16.0f, 138.0f, 8.0f, 4.0f);
+            }
+            g.setColour (juce::Colour (0xffffd23f).withAlpha (fadeIn));
+            g.setFont (toy::font (36.0f));
+            g.drawText (caps[ci].title, juce::Rectangle<float> (40.0f, top + 34.0f, 400.0f, 46.0f), juce::Justification::centredLeft);
+            g.setColour (juce::Colours::white.withAlpha (fadeIn));
+            g.setFont (toy::fontMed (22.0f));
+            g.drawText (caps[ci].text, juce::Rectangle<float> (40.0f, top + 80.0f, (float) ed->getWidth() - 80.0f, 34.0f), juce::Justification::centredLeft);
+        }
         if (label.isNotEmpty())
         {
             g.setFont (toy::font (18.0f));
@@ -179,7 +206,7 @@ int main (int argc, char** argv)
     };
 
     const bool ok = recordEditor (proc, *ed, bar * 32.0 + 2.0, argc > 1 ? argv[1] : "/tmp/jam.mp4",
-        [&] (double, juce::MidiBuffer&) {}, sr, perVideoFrame, overlay);
+        [&] (double, juce::MidiBuffer&) {}, sr, perVideoFrame, overlay, 130);
     std::cout << (ok ? "wrote video\n" : "FAILED\n");
     return ok ? 0 : 1;
 }

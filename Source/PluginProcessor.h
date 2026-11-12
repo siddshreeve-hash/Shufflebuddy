@@ -53,6 +53,11 @@ public:
     int currentSlot() const { return (int) apvts.getRawParameterValue ("slot")->load(); }
     int playingSlot() const { return playSlotNow.load(); }
     // what the grid shows: the playing pattern while CHAIN runs, else the selected one
+    // what the sequencer is ACTUALLY playing this bar, and why each hit differs from the stored pattern
+    enum HitSource : juce::uint8 { FromPattern = 0, FromVariety = 1, FromGhosts = 2, FromFill = 3, Dropped = 4 };
+    juce::uint8 playedCell (int pad, int step) const { return played[(size_t) pad][(size_t) step].load(); }
+    juce::uint8 playedSource (int pad, int step) const { return playedSrc[(size_t) pad][(size_t) step].load(); }
+    int playedSlot() const { return playedSlotNow.load(); }
     int viewSlot() const { return (apvts.getRawParameterValue ("chain")->load() > 0.5f && apvts.getRawParameterValue ("play")->load() > 0.5f) ? playingSlot() : currentSlot(); }
 
     // ---- sounds
@@ -149,7 +154,11 @@ private:
     std::array<std::atomic<int>, 128> ccMap;
     std::atomic<int> learnParam { -1 }, mapVersion { 0 };
 
-    std::atomic<int> stepNow { 0 }, barNow { 0 }, playSlotNow { 0 };
+    std::atomic<int> stepNow { 0 }, barNow { 0 }, playSlotNow { 0 }, playedSlotNow { -1 };
+    std::array<std::array<std::atomic<juce::uint8>, groove::numSteps>, NumPads> played, playedSrc;
+    std::array<std::array<juce::uint8, groove::numSteps>, NumPads> srcTmp {};
+    void publishBar();
+    void markDiff (const groove::Grid& before, juce::uint8 source);
     std::array<std::atomic<int>, NumPads> hitCount {};
     std::array<std::atomic<float>, NumPads> hitVel {};
     std::atomic<float> outLvl { 0.0f }, grNow { 0.0f }, echoLvl { 0.0f };

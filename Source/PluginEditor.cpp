@@ -316,11 +316,37 @@ void StepGrid::paint (juce::Graphics& g)
             g.setColour (s == cur ? juce::Colour (0xffffe9a8) : (beatShade ? juce::Colour (0xfff1e6cc) : juce::Colour (0xffe9ddbf)));
             g.fillRoundedRectangle (c, 10.0f);
             const int v = proc.cell (slot, pd, s);
-            if (v > 0)
+            auto dot = [&] (int lv, float alpha)
             {
-                const float d = v == 3 ? 22.0f : v == 2 ? 16.0f : 10.0f;
-                g.setColour (v == 1 ? juce::Colour (0xff9aa1b6) : (v == 3 ? col.darker (0.2f) : toy::ink));
+                const float d = lv == 3 ? 22.0f : lv == 2 ? 16.0f : 10.0f;
+                g.setColour ((lv == 1 ? juce::Colour (0xff9aa1b6) : (lv == 3 ? col.darker (0.2f) : toy::ink)).withMultipliedAlpha (alpha));
                 g.fillEllipse (c.getCentreX() - d * 0.5f, c.getCentreY() - d * 0.5f, d, d);
+            };
+            // live view: show what the sequencer is really playing this bar, and why it differs from the pattern
+            const bool live = playing && proc.playedSlot() == slot;
+            const int pv = live ? proc.playedCell (pd, s) : v;
+            const int src = live ? proc.playedSource (pd, s) : 0;
+            if (src == ShuffleBuddyProcessor::Dropped)
+            {
+                dot (v, 0.22f);
+                g.setColour (toy::green.withAlpha (0.8f));
+                g.drawLine (c.getCentreX() - 6, c.getCentreY() - 6, c.getCentreX() + 6, c.getCentreY() + 6, 2.0f);
+                g.drawLine (c.getCentreX() + 6, c.getCentreY() - 6, c.getCentreX() - 6, c.getCentreY() + 6, 2.0f);
+            }
+            else if (src != 0 && pv > 0)
+            {
+                const auto sc = src == ShuffleBuddyProcessor::FromGhosts ? toy::blue : src == ShuffleBuddyProcessor::FromFill ? toy::orange : toy::green;
+                g.setColour (sc.withAlpha (0.22f));
+                g.fillRoundedRectangle (c.reduced (2.0f), 8.0f);
+                g.setColour (sc);
+                g.drawRoundedRectangle (c.reduced (2.0f), 8.0f, 2.5f);
+                dot (pv, 1.0f);
+            }
+            else if (pv > 0) dot (pv, 1.0f);
+            if (live && s == cur && pv > 0)   // the hit happening right now
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.85f));
+                g.drawEllipse (c.getCentreX() - 15, c.getCentreY() - 15, 30, 30, 3.0f);
             }
         }
 
@@ -348,6 +374,23 @@ void StepGrid::paint (juce::Graphics& g)
     legend (16, toy::red, "BIG HIT");
     legend (12, toy::ink, "NORMAL");
     legend (8, juce::Colour (0xff9aa1b6), "GHOST");
+    if (playing)
+    {
+        auto chip = [&] (juce::Colour c, const juce::String& txt)
+        {
+            const float tw = toy::fontMed (13.0f).getStringWidthFloat (txt) + 18.0f;
+            g.setColour (c.withAlpha (0.22f)); g.fillRoundedRectangle (lx, ly - 1, tw, 20, 7);
+            g.setColour (c); g.drawRoundedRectangle (lx, ly - 1, tw, 20, 7, 2.0f);
+            g.setColour (toy::ink); g.drawText (txt, juce::Rectangle<float> (lx, ly, tw, 18.0f), juce::Justification::centred);
+            lx += tw + 8.0f;
+        };
+        chip (toy::blue, "+ GHOSTS");
+        chip (toy::green, "+ VARIETY");
+        chip (toy::orange, "+ FILL");
+        g.setColour (toy::green); g.setFont (toy::fontMed (13.0f));
+        g.drawText ("X = DROPPED THIS BAR", juce::Rectangle<float> (lx, ly, 200.0f, 18.0f), juce::Justification::centredLeft);
+        return;
+    }
     g.setColour (toy::brown);
     g.drawText ("CLICK: ADD > BIG > GHOST > OFF   RIGHT-CLICK: GHOST   DRAG PUSH: EARLY/LATE", juce::Rectangle<float> (lx, ly, (float) getWidth() - lx - gridPad, 18.0f), juce::Justification::centredRight);
 }
