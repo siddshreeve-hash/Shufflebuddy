@@ -1153,6 +1153,11 @@ void ShuffleBuddyEditor::setParam (const juce::String& id, float value)
 
 void ShuffleBuddyEditor::timerCallback()
 {
+    // after clicking a knob or button, hand the keyboard back so 1-8, space, T and K keep working
+    if (isShowing() && ! hasKeyboardFocus (true))
+        if (auto* peer = getPeer())
+            if (peer->isFocused() && juce::ModalComponentManager::getInstance()->getNumModalComponents() == 0 && ! juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown())
+                grabKeyboardFocus();
     for (auto& pd : pads) pd->tick();
     const int step = proc.playStep();
     const bool playing = proc.apvts.getRawParameterValue ("play")->load() > 0.5f;

@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "ScaledEditor.h"
 #include "SBSamples.h"
 
 using APF = juce::AudioParameterFloat;
@@ -769,7 +770,7 @@ void ShuffleBuddyProcessor::runChunk (float* L, float* R, int n)
     sampleClock += n;
 }
 
-juce::AudioProcessorEditor* ShuffleBuddyProcessor::createEditor() { return new ShuffleBuddyEditor (*this); }
+juce::AudioProcessorEditor* ShuffleBuddyProcessor::createEditor() { return new ScaledEditor<ShuffleBuddyEditor, ShuffleBuddyProcessor> (*this); }
 
 void ShuffleBuddyProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
