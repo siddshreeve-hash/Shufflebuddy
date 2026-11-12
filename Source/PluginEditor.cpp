@@ -3,7 +3,7 @@
 
 namespace
 {
-    constexpr int W = 1260, H = 860;
+    constexpr int W = 1260, H = 1050;
     constexpr int gridLabelW = 92, gridPushW = 58, gridPad = 16, gridTop = 42, gridRowH = 44;
 }
 
@@ -34,6 +34,50 @@ ToyLookAndFeel::ToyLookAndFeel()
 
 void ToyLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down)
 {
+    if (b.getName() == "throw")
+    {
+        // big hazard button: black/yellow stripes round a cream plate, sinks when held
+        auto r = b.getLocalBounds().toFloat();
+        const float depth = 10.0f, sink = down ? depth - 3.0f : 0.0f;
+        auto face = r.withTrimmedBottom (depth).translated (0.0f, sink);
+        g.setColour (juce::Colour (0xff8a6a00));
+        g.fillRoundedRectangle (r.withTrimmedTop (depth), 26.0f);
+        juce::Path clip; clip.addRoundedRectangle (face, 26.0f);
+        {
+            juce::Graphics::ScopedSaveState ss (g);
+            g.reduceClipRegion (clip);
+            g.setColour (toy::yellow);
+            g.fillRect (face);
+            g.setColour (toy::ink);
+            for (float x = face.getX() - face.getHeight(); x < face.getRight(); x += 36.0f)
+            {
+                juce::Path st;
+                st.addQuadrilateral (x, face.getBottom(), x + 18.0f, face.getBottom(), x + 18.0f + face.getHeight(), face.getY(), x + face.getHeight(), face.getY());
+                g.fillPath (st);
+            }
+        }
+        auto plate = face.reduced (22.0f, 18.0f);
+        g.setColour (down ? toy::echoCol : toy::cream);
+        g.fillRoundedRectangle (plate, 16.0f);
+        g.setColour (toy::ink);
+        g.drawRoundedRectangle (plate, 16.0f, 3.0f);
+        if (over && ! down) { g.setColour (juce::Colours::white.withAlpha (0.12f)); g.fillRoundedRectangle (face, 26.0f); }
+        return;
+    }
+    if (b.getName() == "pill")
+    {
+        auto r = b.getLocalBounds().toFloat();
+        const bool on = b.getToggleState();
+        const float sink = (on || down) ? 2.0f : 0.0f;
+        auto face = r.withTrimmedBottom (4.0f).translated (0.0f, sink);
+        const auto col = b.findColour (juce::TextButton::buttonOnColourId);
+        g.setColour (toy::deckLo);
+        g.fillRoundedRectangle (r.withTrimmedTop (4.0f), 9.0f);
+        g.setColour (on ? col : (over ? toy::deck.brighter (0.25f) : toy::deck.brighter (0.12f)));
+        g.fillRoundedRectangle (face, 9.0f);
+        if (on) { g.setColour (juce::Colours::white.withAlpha (0.25f)); g.fillRoundedRectangle (face.withHeight (face.getHeight() * 0.4f).reduced (4.0f, 2.0f), 5.0f); }
+        return;
+    }
     const auto base = b.findColour (juce::TextButton::buttonColourId);
     const float depth = 6.0f;
     auto r = b.getLocalBounds().toFloat();
@@ -56,9 +100,29 @@ void ToyLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b, c
 
 void ToyLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool, bool down)
 {
+    if (b.getName() == "throw")
+    {
+        auto face = b.getLocalBounds().toFloat().withTrimmedBottom (10.0f).translated (0.0f, down ? 7.0f : 0.0f).reduced (22.0f, 18.0f);
+        g.setColour (toy::ink);
+        g.setFont (toy::font (40.0f));
+        g.drawText ("THROW!", face.withTrimmedBottom (18.0f), juce::Justification::centred);
+        g.setFont (toy::font (12.0f));
+        g.drawText (down ? "DUBBING IT OUT..." : "HOLD TO SEND EVERYTHING INTO THE ECHO", face.withTrimmedTop (face.getHeight() - 26.0f), juce::Justification::centred);
+        return;
+    }
+    if (b.getName() == "pill")
+    {
+        const bool on = b.getToggleState();
+        auto face = b.getLocalBounds().toFloat().withTrimmedBottom (4.0f).translated (0.0f, (on || down) ? 2.0f : 0.0f);
+        g.setColour (on ? toy::deckLo : toy::cream.withAlpha (0.8f));
+        g.setFont (toy::font (15.0f));
+        g.drawText (b.getButtonText(), face, juce::Justification::centred);
+        return;
+    }
     const bool pressed = down || (b.getToggleState() && b.getName() != "style");
     auto face = b.getLocalBounds().toFloat().withTrimmedBottom (6.0f).translated (0.0f, pressed ? 4.0f : 0.0f);
     const auto txt = b.findColour (juce::TextButton::textColourOffId);
+    if (! b.isEnabled()) g.setOpacity (0.35f);
     if (b.getName() == "play")
     {
         juce::Path p; const auto c = face.getCentre();
@@ -81,11 +145,14 @@ void ToyLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w, i
     const auto c = bounds.getCentre().translated (0.0f, -2.0f);
     const auto col = s.findColour (juce::Slider::rotarySliderFillColourId);
     // tick dots around the knob
+    const bool bipolar = s.getProperties()["bipolar"];
+    const bool onDeck = s.getProperties()["deck"];
     for (int i = 0; i <= 10; ++i)
     {
         const float a = start + (end - start) * (float) i / 10.0f;
-        const bool lit = (float) i / 10.0f <= pos + 0.001f;
-        g.setColour (lit ? col : toy::brown.withAlpha (0.3f));
+        const float f = (float) i / 10.0f;
+        const bool lit = bipolar ? (pos < 0.5f ? (f >= pos - 0.05f && f <= 0.5f) : (f >= 0.5f && f <= pos + 0.05f)) : f <= pos + 0.001f;
+        g.setColour (lit ? col : (onDeck ? toy::cream.withAlpha (0.18f) : toy::brown.withAlpha (0.3f)));
         g.fillEllipse (c.x + std::sin (a) * (r + 5.0f) - 2.0f, c.y - std::cos (a) * (r + 5.0f) - 2.0f, 4.0f, 4.0f);
     }
     const float kr = r - 2.0f;
@@ -128,10 +195,24 @@ void LcdDisplay::paint (juce::Graphics& g)
         g.drawText (left, lr, juce::Justification::centredLeft);
         if (right.isNotEmpty()) g.drawText (right, lr, juce::Justification::centredRight);
     };
-    line (24.0f, "PATTERN " + juce::String::charToString ((juce::juce_wchar) ('A' + slot)), juce::String (juce::roundToInt (pv ("tempo"))) + " BPM", 26.0f);
+    const int chain = (int) pv ("chain");
+    const juce::String chainTxt = chain == 0 ? juce::String() : (playing ? "PLAYING " + juce::String::charToString ((juce::juce_wchar) ('A' + proc.playingSlot())) : juce::String ("CHAIN ") + proc.apvts.getParameter ("chain")->getCurrentValueAsText());
+    line (24.0f, "PATTERN " + juce::String::charToString ((juce::juce_wchar) ('A' + slot)), chainTxt.isNotEmpty() ? chainTxt : juce::String (juce::roundToInt (pv ("tempo"))) + " BPM", 26.0f);
     line (34.0f, groove::styleName ((int) pv ("style")), {}, 34.0f);
     const bool showPad = selectedPad >= 0 && juce::Time::getMillisecondCounter() - padShownAt < 3000;
-    if (showPad)
+    const int learn = proc.learningParam();
+    if (learn >= 0 && learn < proc.getParameters().size())
+    {
+        const bool blink = (juce::Time::getMillisecondCounter() / 400) % 2 == 0;
+        line (24.0f, blink ? "MIDI LEARN: TURN A KNOB" : "", {}, 24.0f);
+        line (24.0f, "> " + proc.getParameters()[learn]->getName (24).toUpperCase(), {}, 24.0f);
+    }
+    else if (msgA.isNotEmpty() && juce::Time::getMillisecondCounter() - msgAt < 2200)
+    {
+        line (24.0f, msgA, {}, 24.0f);
+        line (24.0f, msgB, {}, 24.0f);
+    }
+    else if (showPad)
     {
         const auto P = [&] (const char* b) { return proc.apvts.getParameter (ShuffleBuddyProcessor::pid (b, selectedPad))->getCurrentValueAsText(); };
         line (24.0f, ShuffleBuddyProcessor::padName (selectedPad) + juce::String ("  TUNE ") + P ("tune"), proc.samplePath (selectedPad).isNotEmpty() ? "WAV" : "SYNTH", 24.0f);
@@ -142,6 +223,34 @@ void LcdDisplay::paint (juce::Graphics& g)
         line (24.0f, "SWING " + juce::String (juce::roundToInt (pv ("swing"))) + "%", "GHOSTS " + juce::String (juce::roundToInt (pv ("ghosts") * 100)) + "%", 24.0f);
         line (24.0f, "LOOSEN " + juce::String (juce::roundToInt (pv ("loosen") * 100)) + "%",
               playing ? "BAR " + juce::String (proc.playBar() + 1) + "/4" : juce::String ("READY"), 24.0f);
+    }
+}
+
+// ================================================================ meters
+void FxMeter::paint (juce::Graphics& g)
+{
+    const float v = value ? juce::jlimit (0.0f, 1.0f, value()) : 0.0f;
+    shown = v;
+    auto r = getLocalBounds().toFloat();
+    g.setColour (toy::deckLo);
+    g.fillRoundedRectangle (r, 5.0f);
+    if (! vertical)   // a single round LED
+    {
+        auto led = r.reduced (3.0f);
+        g.setColour (colour.withAlpha (0.15f + 0.85f * v));
+        g.fillEllipse (led);
+        g.setColour (juce::Colours::white.withAlpha (0.35f * v));
+        g.fillEllipse (led.reduced (led.getWidth() * 0.3f).translated (-1.5f, -1.5f));
+        return;
+    }
+    const int n = 10;
+    auto in = r.reduced (3.0f);
+    const float h = in.getHeight() / (float) n;
+    for (int i = 0; i < n; ++i)   // fills from the top down, like gain reduction on a console
+    {
+        const bool lit = (float) i < v * (float) n;
+        g.setColour (lit ? colour.interpolatedWith (toy::red, (float) i / (float) n) : toy::deck.brighter (0.1f));
+        g.fillRoundedRectangle (in.getX(), in.getY() + (float) i * h + 1.0f, in.getWidth(), h - 2.0f, 2.0f);
     }
 }
 
@@ -278,6 +387,7 @@ void StepGrid::mouseDown (const juce::MouseEvent& e)
     }
     const int slot = proc.currentSlot();
     const int v = proc.cell (slot, h.pad, h.step);
+    proc.pushUndo (slot);
     int nv;
     if (e.mods.isPopupMenu()) nv = v == 1 ? 0 : 1;
     else if (e.mods.isShiftDown()) nv = 3;
@@ -412,7 +522,7 @@ ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
     {
         juce::Graphics g (backdrop);
         g.fillAll (juce::Colour (0xffdbe6f7));
-        auto c = juce::Rectangle<float> (30, 30, 1200, 800);
+        auto c = juce::Rectangle<float> (30, 30, 1200, (float) H - 70.0f);
         g.setColour (juce::Colour (0x401f2333));
         g.fillRoundedRectangle (c.translated (0, 26).expanded (6, 0), 52.0f);
         g.setColour (toy::yellowSh);
@@ -453,7 +563,40 @@ ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
         g.setFont (toy::font (13.0f));
         g.setColour (toy::brown);
         g.drawText ("PICK A STYLE", 60, 398, 200, 16, juce::Justification::centredLeft);
-        g.drawText ("TEMPO", 296, 300, 108, 16, juce::Justification::centred);
+        // tempo window in the header
+        g.setColour (toy::ink);  g.fillRoundedRectangle (770, 56, 210, 50, 14);
+        g.setColour (toy::bezel); g.fillRoundedRectangle (770, 52, 210, 50, 14);
+        g.setColour (toy::lcdBg); g.fillRoundedRectangle (820, 59, 110, 36, 8);
+        g.setFont (toy::font (11.0f)); g.setColour (toy::brown);
+        g.drawText ("TEMPO", 770, 104, 210, 14, juce::Justification::centred);
+
+        // FX deck: a dark tray set into the plastic, like DubChord's flight deck
+        auto d = juce::Rectangle<float> (48, 806, 1164, 160);
+        g.setColour (toy::yellowSh); g.fillRoundedRectangle (d.expanded (6).translated (0, -4), 30);
+        g.setColour (toy::deckLo);   g.fillRoundedRectangle (d, 26);
+        g.setColour (toy::deck);     g.fillRoundedRectangle (d.withTrimmedTop (6), 26);
+        g.setColour (juce::Colours::white.withAlpha (0.05f));
+        for (int i = 0; i < 40; ++i) g.fillEllipse (d.getX() + 30.0f + (float) i * 28.0f, d.getBottom() - 14.0f, 4, 4);
+        // sticker label
+        {
+            juce::Graphics::ScopedSaveState ss (g);
+            g.addTransform (juce::AffineTransform::rotation (-0.06f, 120, 806));
+            g.setColour (juce::Colour (0xffb3420a)); g.fillRoundedRectangle (66, 792, 130, 30, 11);
+            g.setColour (toy::echoCol); g.fillRoundedRectangle (66, 789, 130, 30, 11);
+            g.setColour (juce::Colours::white); g.setFont (toy::font (17.0f));
+            g.drawText ("DUB DECK", 66, 789, 130, 30, juce::Justification::centred);
+        }
+        g.setFont (toy::font (12.0f));
+        g.setColour (toy::cream.withAlpha (0.6f));
+        g.drawText ("ECHO TIME", 214, 830, 236, 14, juce::Justification::centredLeft);
+        g.drawText ("ECHO TYPE", 214, 892, 236, 14, juce::Justification::centredLeft);
+        g.drawText ("GR", 828, 832, 24, 14, juce::Justification::centred);
+        // little patch cables between sections (decoration)
+        g.setColour (toy::echoCol.withAlpha (0.5f));
+        g.drawLine (186, 840, 206, 840, 3.0f);
+        // dividers
+        g.setColour (toy::deckLo);
+        for (float x : { 462.0f, 860.0f }) g.fillRoundedRectangle (x, 828, 3, 128, 1.5f);
     }
 
     addAndMakeVisible (lcd);
@@ -507,8 +650,17 @@ ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
     {
         slotBtns[i].setButtonText (juce::String::charToString ((juce::juce_wchar) ('A' + i)));
         slotBtns[i].setName ("slot");
-        setupBtn (slotBtns[i], juce::Colours::white, toy::ink, "Pattern " + slotBtns[i].getButtonText() + " (switches on the next bar)");
-        slotBtns[i].onClick = [this, i] { setParam ("slot", (float) i); grid.repaint(); };
+        setupBtn (slotBtns[i], juce::Colours::white, toy::ink, "Pattern " + slotBtns[i].getButtonText() + " (switches on the next bar). Shift-click: copy the current pattern here");
+        slotBtns[i].onClick = [this, i]
+        {
+            const int from = proc.currentSlot();
+            if (juce::ModifierKeys::currentModifiers.isShiftDown() && from != i)
+            {
+                proc.copySlot (from, i);
+                lcd.flash ("COPIED " + juce::String::charToString ((juce::juce_wchar) ('A' + from)) + " > " + juce::String::charToString ((juce::juce_wchar) ('A' + i)), "NOW EDIT THE COPY");
+            }
+            setParam ("slot", (float) i); grid.repaint();
+        };
     }
 
     setupBtn (tempoDown, juce::Colours::white, toy::ink, "Slower");
@@ -524,13 +676,80 @@ ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
     makeKnob ("dust", "DUST", toy::olive).setTooltip ("Vinyl crackle, hiss and a little lo-fi grit");
     makeKnob ("master", "VOLUME", toy::ink);
 
+    // DUB DECK (borrowed from DubChord): echo, space, filter, squash, throw
+    {
+        auto& e = makeKnob ("echo", "ECHO", toy::echoCol, true);
+        e.setTooltip ("Tape echo return. Each pad's ECHO send (pad edit) decides how much of it goes in");
+        makeKnob ("space", "SPACE", toy::spaceCol, true).setTooltip ("Dub reverb return. Each pad's SPACE send decides how much goes in");
+        auto& f = makeKnob ("fxfilter", "FILTER", toy::filterCol, true);
+        f.getProperties().set ("bipolar", true);
+        f.setTooltip ("Left = low-pass (muffled, from the next room). Right = high-pass (thin, for build-ups). Middle = off");
+        makeKnob ("squash", "SQUASH", toy::squashCol, true).setTooltip ("Glue compressor + warm saturation on the whole kit. Up = punchier, louder, more pumping");
+    }
+    const char* times[] = { "1/16", "1/8", "1/8.", "1/4" };
+    for (int i = 0; i < 4; ++i)
+    {
+        timeBtns[i].setButtonText (times[i]); timeBtns[i].setName ("pill");
+        timeBtns[i].setColour (juce::TextButton::buttonOnColourId, toy::echoCol);
+        timeBtns[i].setWantsKeyboardFocus (false);
+        timeBtns[i].setTooltip (i == 2 ? "Dotted 8th: the classic dub echo" : "Echo repeat time, locked to the tempo");
+        timeBtns[i].onClick = [this, i] { setParam ("echotime", (float) i); };
+        timeBtns[i].setComponentID ("echotime");
+        addAndMakeVisible (timeBtns[i]);
+    }
+    const char* types[] = { "TAPE", "SPACE-E", "BBD" };
+    const char* typeTips[] = { "Tape echo: warm, wobbly, darker every repeat", "Space Echo: multi-head tape, rhythmic clusters", "Bucket brigade: grainy, dark, chorusy" };
+    for (int i = 0; i < 3; ++i)
+    {
+        typeBtns[i].setButtonText (types[i]); typeBtns[i].setName ("pill");
+        typeBtns[i].setColour (juce::TextButton::buttonOnColourId, toy::echoCol);
+        typeBtns[i].setWantsKeyboardFocus (false);
+        typeBtns[i].setTooltip (typeTips[i]);
+        typeBtns[i].onClick = [this, i] { setParam ("echotype", (float) i); };
+        typeBtns[i].setComponentID ("echotype");
+        addAndMakeVisible (typeBtns[i]);
+    }
+    throwBtn.setName ("throw");
+    throwBtn.setWantsKeyboardFocus (false);
+    throwBtn.setComponentID ("throw");
+    throwBtn.setTooltip ("Hold: everything feeds the echo and it runs away. Let go: the echoes ring out. (key T)");
+    throwBtn.onStateChange = [this] { const bool d = throwBtn.isDown(); if (d != (proc.apvts.getRawParameterValue ("throw")->load() > 0.5f)) setParam ("throw", d ? 1.0f : 0.0f); };
+    addAndMakeVisible (throwBtn);
+    grMeter.colour = toy::squashCol;
+    grMeter.value = [this] { return proc.squashGR() / 12.0f; };
+    grMeter.setTooltip ("How hard SQUASH is working (gain reduction)");
+    addAndMakeVisible (grMeter);
+    echoLed.colour = toy::echoCol; echoLed.vertical = false;
+    echoLed.value = [this] { return juce::jlimit (0.0f, 1.0f, proc.echoLevel() * 4.0f); };
+    addAndMakeVisible (echoLed);
+
+    setupBtn (undoBtn, juce::Colours::white, toy::ink, "Undo the last pattern change (Ctrl+Z)");
+    undoBtn.setName ("slot");
+    undoBtn.onClick = [this] { doUndo(); };
+    setupBtn (chainBtn, juce::Colours::white, toy::ink, "Chain patterns: A-B, A-B-C-D or A-A-A-B. Each pattern plays for one bar");
+    chainBtn.setName ("slot");
+    chainBtn.onClick = [this]
+    {
+        const int c = ((int) proc.apvts.getRawParameterValue ("chain")->load() + 1) % 4;
+        setParam ("chain", (float) c);
+        lcd.flash (c == 0 ? juce::String ("CHAIN OFF") : "CHAIN " + proc.apvts.getParameter ("chain")->getCurrentValueAsText(), c == 0 ? juce::String ("ONE PATTERN LOOPS") : juce::String ("ONE BAR EACH"));
+    };
+
+    // anything with a parameter can be MIDI-learned from its right-click menu
+    for (auto* c : getChildren()) c->addMouseListener (this, false);
+    tempoLabel.setFont (toy::lcd (30.0f));
+    tempoLabel.setColour (juce::Label::textColourId, toy::lcdInk);
+    tempoLabel.setJustificationType (juce::Justification::centred);
+    tempoLabel.setInterceptsMouseClicks (false, false);
+    addAndMakeVisible (tempoLabel);
+
     padEditLabel.setFont (toy::font (13.0f));
     padEditLabel.setColour (juce::Label::textColourId, toy::brown);
     addAndMakeVisible (padEditLabel);
     hint.setFont (toy::fontMed (13.0f));
     hint.setColour (juce::Label::textColourId, toy::brown);
     hint.setJustificationType (juce::Justification::centred);
-    hint.setText ("KEYS 1-8 PLAY THE PADS   /   SPACE PLAYS + STOPS   /   DRAG WAV FILES ONTO A PAD   /   RIGHT-CLICK A PAD FOR MORE", juce::dontSendNotification);
+    hint.setText ("KEYS 1-8 PLAY PADS  /  SPACE PLAY-STOP  /  T THROW  /  CTRL+Z UNDO  /  SHIFT-CLICK A SLOT TO COPY INTO IT  /  DRAG WAVS ONTO PADS  /  RIGHT-CLICK A KNOB TO MIDI LEARN", juce::dontSendNotification);
     addAndMakeVisible (hint);
 
     selectPad (1);
@@ -541,21 +760,24 @@ ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
 
 ShuffleBuddyEditor::~ShuffleBuddyEditor() { setLookAndFeel (nullptr); }
 
-juce::Slider& ShuffleBuddyEditor::makeKnob (const juce::String& id, const juce::String& label, juce::Colour c)
+juce::Slider& ShuffleBuddyEditor::makeKnob (const juce::String& id, const juce::String& label, juce::Colour c, bool onDeck)
 {
     Knob k;
     k.id = id;
     k.s = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
     k.s->setColour (juce::Slider::rotarySliderFillColourId, c);
-    k.s->setColour (juce::Slider::textBoxTextColourId, toy::ink);
+    k.s->setColour (juce::Slider::textBoxTextColourId, onDeck ? toy::cream : toy::ink);
     k.s->setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-    k.s->setTextBoxStyle (juce::Slider::TextBoxBelow, true, 70, 16);
+    k.s->setTextBoxStyle (juce::Slider::TextBoxBelow, true, 80, 16);
+    k.s->setComponentID (id);
+    k.s->getProperties().set ("deck", onDeck);
     k.s->setWantsKeyboardFocus (false);
     k.s->setDoubleClickReturnValue (true, proc.apvts.getParameter (id)->convertFrom0to1 (proc.apvts.getParameter (id)->getDefaultValue()));
     k.att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, id, *k.s);
     k.name = std::make_unique<juce::Label> (id, label);
     k.name->setFont (toy::font (13.0f));
-    k.name->setColour (juce::Label::textColourId, toy::brown);
+    k.name->setColour (juce::Label::textColourId, onDeck ? c : toy::brown);
+    k.name->getProperties().set ("deck", onDeck);
     k.name->setJustificationType (juce::Justification::centred);
     addAndMakeVisible (*k.s);
     addAndMakeVisible (*k.name);
@@ -573,14 +795,18 @@ void ShuffleBuddyEditor::selectPad (int pad)
     // rebuild the three pad knobs for this pad
     for (auto& k : padKnobs) { removeChildComponent (k.s.get()); removeChildComponent (k.name.get()); }
     padKnobs.clear();
-    const char* ids[] = { "tune", "decay", "lvl" };
-    const char* names[] = { "TUNE", "DECAY", "LEVEL" };
-    for (int i = 0; i < 3; ++i)
+    const char* ids[] = { "tune", "decay", "lvl", "esend", "ssend" };
+    const char* names[] = { "TUNE", "DECAY", "LEVEL", "ECHO", "SPACE" };
+    const juce::Colour cols[] = { toy::padColour (pad), toy::padColour (pad), toy::padColour (pad), toy::echoCol, toy::spaceCol };
+    for (int i = 0; i < 5; ++i)
     {
         Knob k;
         k.id = ShuffleBuddyProcessor::pid (ids[i], pad);
         k.s = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox);
-        k.s->setColour (juce::Slider::rotarySliderFillColourId, toy::padColour (pad));
+        k.s->setColour (juce::Slider::rotarySliderFillColourId, cols[i]);
+        k.s->setComponentID (k.id);
+        k.s->addMouseListener (this, false);
+        if (i >= 3) k.s->setTooltip (juce::String ("How much ") + ShuffleBuddyProcessor::padName (pad) + (i == 3 ? " goes into the echo" : " goes into the space reverb"));
         k.s->setWantsKeyboardFocus (false);
         k.s->setDoubleClickReturnValue (true, proc.apvts.getParameter (k.id)->convertFrom0to1 (proc.apvts.getParameter (k.id)->getDefaultValue()));
         k.att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, k.id, *k.s);
@@ -593,6 +819,7 @@ void ShuffleBuddyEditor::selectPad (int pad)
         addAndMakeVisible (*k.name);
         padKnobs.push_back (std::move (k));
     }
+    lastMapVersion = -1;
     resized();
 }
 
@@ -621,12 +848,90 @@ void ShuffleBuddyEditor::timerCallback()
         slotBtns[i].setColour (juce::TextButton::textColourOffId, i == slot ? toy::yellow : toy::ink);
     }
     playBtn.setToggleState (playing, juce::dontSendNotification);
+
+    const int chain = (int) proc.apvts.getRawParameterValue ("chain")->load();
+    if (chain != 0)
+        for (int i = 0; i < 4; ++i)
+            if (i == proc.playingSlot() && playing && i != slot)
+            {
+                slotBtns[i].setColour (juce::TextButton::buttonColourId, toy::orange);
+                slotBtns[i].setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+            }
+    chainBtn.setButtonText (chain == 0 ? "CHAIN" : proc.apvts.getParameter ("chain")->getCurrentValueAsText());
+    chainBtn.setColour (juce::TextButton::buttonColourId, chain == 0 ? juce::Colours::white : toy::orange);
+    chainBtn.setColour (juce::TextButton::textColourOffId, chain == 0 ? toy::ink : juce::Colours::white);
+    undoBtn.setEnabled (proc.canUndo());
+
+    const int et = (int) proc.apvts.getRawParameterValue ("echotime")->load();
+    const int ty = (int) proc.apvts.getRawParameterValue ("echotype")->load();
+    for (int i = 0; i < 4; ++i) timeBtns[i].setToggleState (i == et, juce::dontSendNotification);
+    for (int i = 0; i < 3; ++i) typeBtns[i].setToggleState (i == ty, juce::dontSendNotification);
+    tempoLabel.setText (juce::String (juce::roundToInt (proc.apvts.getRawParameterValue ("tempo")->load())), juce::dontSendNotification);
+    grMeter.repaint();
+    echoLed.repaint();
+    if (proc.mappingVersion() != lastMapVersion || proc.learningParam() != lastLearn) refreshMappings();
+}
+
+void ShuffleBuddyEditor::refreshMappings()
+{
+    lastMapVersion = proc.mappingVersion();
+    lastLearn = proc.learningParam();
+    auto update = [this] (Knob& k)
+    {
+        auto* prm = proc.apvts.getParameter (k.id);
+        const int cc = proc.ccFor (prm->getParameterIndex());
+        const bool learning = proc.learningParam() == prm->getParameterIndex();
+        const bool deck = k.name->getProperties()["deck"];
+        const auto base = deck ? k.s->findColour (juce::Slider::rotarySliderFillColourId) : toy::brown;
+        k.name->setColour (juce::Label::textColourId, learning ? toy::red : (cc >= 0 ? (deck ? juce::Colour (0xff7fd7ff) : toy::blue) : base));
+        auto t = k.name->getText().upToFirstOccurrenceOf (" CC", false, false);
+        k.name->setText (cc >= 0 ? t + " CC" + juce::String (cc) : t, juce::dontSendNotification);
+    };
+    for (auto& k : knobs) update (k);
+    for (auto& k : padKnobs) update (k);
+}
+
+void ShuffleBuddyEditor::doUndo()
+{
+    if (proc.undo()) { lcd.flash ("UNDO", "PATTERN " + juce::String::charToString ((juce::juce_wchar) ('A' + proc.currentSlot())) + " RESTORED"); grid.repaint(); }
+}
+
+void ShuffleBuddyEditor::mouseDown (const juce::MouseEvent& e)
+{
+    if (! e.mods.isPopupMenu() || e.eventComponent == this) return;
+    const auto id = e.eventComponent->getComponentID();
+    if (id.isNotEmpty() && proc.apvts.getParameter (id) != nullptr) learnMenu (id, e.eventComponent);
+}
+
+void ShuffleBuddyEditor::learnMenu (const juce::String& paramId, juce::Component* target)
+{
+    auto* prm = proc.apvts.getParameter (paramId);
+    const int idx = prm->getParameterIndex();
+    const int cc = proc.ccFor (idx);
+    juce::PopupMenu m;
+    m.addSectionHeader (prm->getName (40).toUpperCase());
+    m.addItem (1, proc.learningParam() == idx ? "Waiting for a MIDI knob..." : "MIDI Learn", true, proc.learningParam() == idx);
+    m.addItem (2, cc >= 0 ? "Forget CC " + juce::String (cc) : "Not mapped", cc >= 0);
+    if (proc.learningParam() >= 0) m.addItem (3, "Cancel learn");
+    m.addItem (4, "Reset to default");
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target), [this, idx, paramId] (int r)
+    {
+        if (r == 1) proc.startLearn (idx);
+        else if (r == 2) proc.clearMapping (idx);
+        else if (r == 3) proc.cancelLearn();
+        else if (r == 4) { auto* q = proc.apvts.getParameter (paramId); q->beginChangeGesture(); q->setValueNotifyingHost (q->getDefaultValue()); q->endChangeGesture(); }
+        refreshMappings();
+    });
 }
 
 bool ShuffleBuddyEditor::keyPressed (const juce::KeyPress& key)
 {
     const auto c = key.getTextCharacter();
     if (c >= '1' && c <= '8') { proc.auditionPad (c - '1', 0.9f); selectPad (c - '1'); return true; }
+    if ((key.getModifiers().isCommandDown() || key.getModifiers().isCtrlDown()) && (c == 'z' || c == 'Z' || key.getKeyCode() == 'Z')) { doUndo(); return true; }
+    if (c == 't' || c == 'T') { setParam ("throw", 1.0f); juce::Timer::callAfterDelay (700, [this] { setParam ("throw", 0.0f); }); return true; }
+    if (key == juce::KeyPress::backspaceKey || key == juce::KeyPress::deleteKey) { proc.clearPattern(); lcd.flash ("CLEARED", "CTRL+Z TO BRING IT BACK"); grid.repaint(); return true; }
+    if (key == juce::KeyPress::escapeKey && proc.learningParam() >= 0) { proc.cancelLearn(); return true; }
     if (key == juce::KeyPress::spaceKey)
     {
         setParam ("play", proc.apvts.getRawParameterValue ("play")->load() > 0.5f ? 0.0f : 1.0f);
@@ -668,14 +973,16 @@ void ShuffleBuddyEditor::paint (juce::Graphics& g)
 void ShuffleBuddyEditor::resized()
 {
     lcd.setBounds (60, 136, 350, 156);
-    padEditLabel.setBounds (60, 298, 230, 18);
+    tempoDown.setBounds (776, 56, 40, 42);
+    tempoUp.setBounds (934, 56, 40, 42);
+    tempoLabel.setBounds (820, 59, 110, 36);
+
+    padEditLabel.setBounds (60, 298, 350, 18);
     for (size_t i = 0; i < padKnobs.size(); ++i)
     {
-        padKnobs[i].s->setBounds (60 + (int) i * 76, 316, 62, 56);
-        padKnobs[i].name->setBounds (52 + (int) i * 76, 370, 78, 16);
+        padKnobs[i].s->setBounds (60 + (int) i * 70, 316, 58, 54);
+        padKnobs[i].name->setBounds (52 + (int) i * 70, 368, 74, 16);
     }
-    tempoDown.setBounds (296, 320, 50, 48);
-    tempoUp.setBounds (354, 320, 50, 48);
 
     for (int i = 0; i < 4; ++i) styleBtns[i].setBounds (60 + (i % 2) * 181, 418 + (i / 2) * 60, 169, 54);
     rollBtn.setBounds (60, 540, 170, 70);
@@ -685,7 +992,7 @@ void ShuffleBuddyEditor::resized()
     grid.setBounds (432, 136, 768, 474);
 
     for (int i = 0; i < NumPads; ++i) pads[(size_t) i]->setBounds (60 + i * 62, 636, 54, 104);
-    for (size_t i = 0; i < knobs.size(); ++i)
+    for (size_t i = 0; i < 6 && i < knobs.size(); ++i)
     {
         knobs[i].name->setBounds (568 + (int) i * 76, 630, 70, 16);
         knobs[i].s->setBounds (568 + (int) i * 76, 646, 70, 86);
@@ -693,5 +1000,25 @@ void ShuffleBuddyEditor::resized()
     playBtn.setBounds (1036, 634, 78, 60);
     stopBtn.setBounds (1122, 634, 78, 60);
     for (int i = 0; i < 4; ++i) slotBtns[i].setBounds (1036 + i * 42, 702, 38, 40);
-    hint.setBounds (60, 760, 1140, 20);
+    undoBtn.setBounds (1036, 748, 78, 40);
+    chainBtn.setBounds (1122, 748, 78, 40);
+
+    // DUB DECK
+    const int dy = 826;
+    auto deckKnob = [&] (size_t i, int x)
+    {
+        if (i >= knobs.size()) return;
+        knobs[i].name->setBounds (x, dy + 2, 96, 16);
+        knobs[i].s->setBounds (x + 3, dy + 18, 90, 110);
+    };
+    deckKnob (6, 86);                      // echo
+    echoLed.setBounds (170, dy + 2, 16, 16);
+    for (int i = 0; i < 4; ++i) timeBtns[i].setBounds (214 + i * 60, dy + 22, 56, 36);
+    for (int i = 0; i < 3; ++i) typeBtns[i].setBounds (214 + i * 80, dy + 84, 76, 36);
+    deckKnob (7, 480);                     // space
+    deckKnob (8, 600);                     // filter
+    deckKnob (9, 720);                     // squash
+    grMeter.setBounds (830, dy + 22, 20, 104);
+    throwBtn.setBounds (884, dy - 2, 310, 134);
+    hint.setBounds (40, 972, 1180, 18);
 }

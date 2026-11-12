@@ -11,6 +11,9 @@ int main (int argc, char** argv)
     proc.prepareToPlay (sr, bs);
     juce::AudioBuffer<float> b (2, bs);
     const double bar = sr * 60.0 / 132.0 * 4.0;
+    set ("squash", 0.55f); set ("chain", 1); set ("fxfilter", -0.3f);
+    proc.startLearn (proc.apvts.getParameter ("echo")->getParameterIndex());
+    { juce::MidiBuffer m; m.addEvent (juce::MidiMessage::controllerEvent (1, 21, 50), 0); proc.processBlock (b, m); }
     for (int k = 0; k < (int) ((bar * 2 + bar * 9.4 / 16.0) / bs); ++k) { juce::MidiBuffer m; proc.processBlock (b, m); }
     std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
     ed->setVisible (true);
