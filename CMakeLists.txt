@@ -11,6 +11,8 @@ include(FetchContent)
 FetchContent_Declare(JUCE GIT_REPOSITORY https://github.com/juce-framework/JUCE.git GIT_TAG 8.0.9 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(JUCE)
 
+file(GLOB SB_SAMPLE_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/samples/*.flac)
+juce_add_binary_data(SBSamples HEADER_NAME SBSamples.h NAMESPACE SBSamples SOURCES ${SB_SAMPLE_FILES})
 juce_add_binary_data(SBFonts SOURCES fonts/Fredoka-Bold.ttf fonts/Fredoka-Medium.ttf fonts/VT323-Regular.ttf)
 
 juce_add_plugin(ShuffleBuddy
@@ -27,7 +29,7 @@ juce_add_plugin(ShuffleBuddy
 target_sources(ShuffleBuddy PRIVATE Source/PluginProcessor.cpp Source/PluginEditor.cpp)
 target_compile_definitions(ShuffleBuddy PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0 JUCE_DISPLAY_SPLASH_SCREEN=0)
 target_link_libraries(ShuffleBuddy
-    PRIVATE SBFonts juce::juce_audio_utils juce::juce_dsp
+    PRIVATE SBFonts SBSamples juce::juce_audio_utils juce::juce_dsp
     PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
 
 option(SB_BUILD_TESTS "Build offline test tools" OFF)
@@ -36,6 +38,6 @@ if(SB_BUILD_TESTS)
         juce_add_console_app(${t} PRODUCT_NAME "${t}")
         target_sources(${t} PRIVATE tests/${t}.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp)
         target_compile_definitions(${t} PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
-        target_link_libraries(${t} PRIVATE SBFonts juce::juce_audio_utils juce::juce_dsp juce::juce_audio_formats juce::juce_recommended_config_flags)
+        target_link_libraries(${t} PRIVATE SBFonts SBSamples juce::juce_audio_utils juce::juce_dsp juce::juce_audio_formats juce::juce_recommended_config_flags)
     endforeach()
 endif()

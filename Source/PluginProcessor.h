@@ -55,6 +55,7 @@ public:
 
     // ---- sounds
     Patch kickPatch (double bpm) const;
+    const RealSet* realSet (int index) const;
     void applyKickPreset (int index);
     void applyKit (int index);
     void surpriseKick();
@@ -92,6 +93,8 @@ private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void timerCallback() override;
     void buildSlots();
+    void loadRealSets();
+    std::vector<RealSet> realSets;
     void runChunk (float* L, float* R, int n);
     void scheduleStep (juce::int64 step, juce::int64 at, double sps);
     void prepareBar (juce::int64 bar);
@@ -101,7 +104,7 @@ private:
     std::array<Slot, 256> slots {};
     static juce::uint32 fnv (const char* s) { juce::uint32 h = 2166136261u; while (*s) { h ^= (juce::uint8) *s++; h *= 16777619u; } return h | 1u; }
     float p (const char* id) const { const auto h = fnv (id); size_t i = h & 255u; while (slots[i].h != h) i = (i + 1) & 255u; return slots[i].raw->load(); }
-    std::array<std::atomic<float>*, NumPads> padLevel {}, padTune {}, padDecay {}, padPush {}, padEcho {}, padSpace {}, padLayer {}, padSnd {};
+    std::array<std::atomic<float>*, NumPads> padLevel {}, padTune {}, padDecay {}, padPush {}, padEcho {}, padSpace {}, padLayer {}, padSnd {}, padReal {}, padRoom {};
 
     std::array<std::array<std::array<std::atomic<juce::uint8>, groove::numSteps>, NumPads>, groove::numSlots> cells;
     std::vector<std::pair<int, groove::Grid>> history;

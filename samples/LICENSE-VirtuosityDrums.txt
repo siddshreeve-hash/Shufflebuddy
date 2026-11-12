@@ -1,0 +1,4 @@
+Samples in this folder are excerpts (trimmed, resampled to 44.1 kHz, close + room mics packed
+into one file) from "Virtuosity Drums" by Versilian Studios & Karoryfer Samples,
+https://github.com/sfzinstruments/virtuosity_drums  —  released under Creative Commons Zero (CC0 1.0),
+public domain dedication. No attribution required; credited with thanks.

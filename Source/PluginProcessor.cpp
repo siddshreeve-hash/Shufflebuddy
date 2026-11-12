@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "SBSamples.h"
 
 using APF = juce::AudioParameterFloat;
 using NR  = juce::NormalisableRange<float>;
@@ -61,6 +62,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShuffleBuddyProcessor::creat
         add (new juce::AudioParameterChoice ({ "klen", 1 }, "Kick Length", juce::StringArray { "Free", "1/16", "1/8", "1/4", "1/2", "Bar" }, 0));
         add (new APF ({ "kduck", 1 }, "Kick Duck", NR (0.0f, 1.0f), 0.15f, fmt (pct)));
         add (new APF ({ "krumble", 1 }, "Kick Rumble", NR (0.0f, 1.0f), 0.0f, fmt (pct)));
+        add (new APF ({ "kreal", 1 }, "Kick Real Layer", NR (0.0f, 1.0f), 0.2f, fmt (pct)));
+        add (new APF ({ "kroom", 1 }, "Kick Room Mic", NR (0.0f, 1.0f), 0.35f, fmt (pct)));
     }
     juce::StringArray soundNames;
     for (auto& snd : sounds::library()) soundNames.add (snd.name);
@@ -70,6 +73,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShuffleBuddyProcessor::creat
         const juce::String n = juce::String (padName (i)).toLowerCase();
         if (i > 0) add (new juce::AudioParameterChoice ({ pid ("snd", i), 1 }, n + " sound", soundNames, sounds::find (padDefault[i])));
         add (new juce::AudioParameterBool ({ pid ("layer", i), 1 }, n + " layer WAV + synth", false));
+        add (new APF ({ pid ("real", i), 1 }, n + " real layer", NR (0.0f, 2.0f), 1.0f, fmt (pct)));
+        add (new APF ({ pid ("room", i), 1 }, n + " room", NR (0.0f, 2.0f), 1.0f, fmt (pct)));
         add (new APF ({ pid ("lvl", i), 1 }, n + " level", NR (0.0f, 1.0f), 0.8f, fmt (pct)));
         add (new APF ({ pid ("tune", i), 1 }, n + " tune", NR (-12.0f, 12.0f, 0.1f), 0.0f, fmt ([] (float x) { return (x > 0 ? "+" : "") + juce::String (x, 1); })));
         add (new APF ({ pid ("decay", i), 1 }, n + " decay", NR (0.0f, 1.0f), 0.45f, fmt (pct)));
@@ -88,6 +93,7 @@ ShuffleBuddyProcessor::ShuffleBuddyProcessor()
       apvts (*this, nullptr, "PARAMS", createLayout())
 {
     formats.registerBasicFormats();
+    loadRealSets();
     for (auto& s : liveSample) s.store (nullptr);
     for (auto& a : pendingAudition) a.store (-1.0f);
     for (auto& h : hitCount) h.store (0);
@@ -103,6 +109,8 @@ ShuffleBuddyProcessor::ShuffleBuddyProcessor()
         padSpace[(size_t) i] = apvts.getRawParameterValue (pid ("ssend", i));
         padLayer[(size_t) i] = apvts.getRawParameterValue (pid ("layer", i));
         padSnd[(size_t) i]   = i > 0 ? apvts.getRawParameterValue (pid ("snd", i)) : nullptr;
+        padReal[(size_t) i]  = apvts.getRawParameterValue (pid ("real", i));
+        padRoom[(size_t) i]  = apvts.getRawParameterValue (pid ("room", i));
     }
     for (auto& c : ccMap) c.store (-1);
     // starter patterns: one per style, so it grooves the moment you press play
@@ -149,6 +157,36 @@ void ShuffleBuddyProcessor::setGrid (int slot, const groove::Grid& g)
     for (int pd = 0; pd < NumPads; ++pd) for (int s = 0; s < groove::numSteps; ++s) setCell (slot, pd, s, g[(size_t) pd][(size_t) s]);
 }
 
+void ShuffleBuddyProcessor::loadRealSets()
+{
+    // decode the bundled recorded hits once, at startup (never on the audio thread)
+    const auto& names = sounds::realNames();
+    realSets.clear();
+    realSets.resize ((size_t) names.size());
+    for (int i = 0; i < names.size(); ++i) realSets[(size_t) i].name = names[i];
+    juce::FlacAudioFormat flac;
+    for (int r = 0; r < SBSamples::namedResourceListSize; ++r)
+    {
+        const juce::String file (SBSamples::originalFilenames[r]);
+        const int setIdx = names.indexOf (file.upToLastOccurrenceOf ("_v", false, false));
+        if (setIdx < 0) continue;
+        int size = 0;
+        const char* data = SBSamples::getNamedResource (SBSamples::namedResourceList[r], size);
+        std::unique_ptr<juce::AudioFormatReader> rd (flac.createReaderFor (new juce::MemoryInputStream (data, (size_t) size, false), true));
+        if (rd == nullptr) continue;
+        RealClip c;
+        c.vel = file.fromLastOccurrenceOf ("_v", false, false).getIntValue();
+        c.buf.setSize ((int) rd->numChannels, (int) rd->lengthInSamples);
+        rd->read (&c.buf, 0, (int) rd->lengthInSamples, 0, true, true);
+        realSets[(size_t) setIdx].clips.push_back (std::move (c));
+    }
+}
+
+const RealSet* ShuffleBuddyProcessor::realSet (int index) const
+{
+    return index >= 0 && index < (int) realSets.size() && ! realSets[(size_t) index].clips.empty() ? &realSets[(size_t) index] : nullptr;
+}
+
 Patch ShuffleBuddyProcessor::kickPatch (double bpm) const
 {
     Patch k;
@@ -169,6 +207,7 @@ Patch ShuffleBuddyProcessor::kickPatch (double bpm) const
                       : (float) (60.0 / bpm / 4.0) * steps[len] * 0.92f;
     k.gateFade = 0.03f;
     k.velPitch = 0.5f;
+    k.real = sounds::real ("kick"); k.realMix = p ("kreal"); k.realRoom = p ("kroom");
     k.gain = 0.9f / (1.0f + 0.35f * k.sub);
     return k;
 }
@@ -190,6 +229,7 @@ void ShuffleBuddyProcessor::applyKickPreset (int index)
     setParamValue ("ksub", k.sub);             setParamValue ("ksubdec", k.subDecay);
     setParamValue ("kknock", k.knock);         setParamValue ("kknockf", k.knockHz);
     setParamValue ("klen", (float) k.length);  setParamValue ("kduck", k.duck);   setParamValue ("krumble", k.rumble);
+    setParamValue ("kreal", k.real);           setParamValue ("kroom", k.roomMic);
     setParamValue ("tune1", 0.0f);             setParamValue ("decay1", 0.45f);
     kickName = k.name;
 }
@@ -206,6 +246,8 @@ void ShuffleBuddyProcessor::applyKit (int index)
         setParamValue (pid ("snd", pd), (float) sounds::find (kit.pads[pd - 1]));
         setParamValue (pid ("tune", pd), 0.0f);
         setParamValue (pid ("decay", pd), 0.45f);
+        setParamValue (pid ("real", pd), 1.0f);
+        setParamValue (pid ("room", pd), 1.0f);
     }
     kitName = kit.name;
 }
@@ -375,15 +417,18 @@ void ShuffleBuddyProcessor::trigger (int pad, float vel)
     if (pad == Kick) kickNow = kickPatch (bpmNow);
     const Patch& patch = pad == Kick ? kickNow : sounds::library()[(size_t) juce::jlimit (0, (int) sounds::library().size() - 1, (int) padSnd[i]->load())].p;
     auto* smpl = liveSample[i].load();
+    const RealSet* rs = realSet (patch.real);
     pick->trigger (pad, vel, patch, padTune[i]->load(), padDecay[i]->load(), padLevel[i]->load(), smpl,
-                   (float) getSampleRate(), sampleClock, (juce::uint32) rng.nextInt(), padEcho[i]->load(), padSpace[i]->load());
+                   (float) getSampleRate(), sampleClock, (juce::uint32) rng.nextInt(), padEcho[i]->load(), padSpace[i]->load(),
+                   rs, padReal[i]->load(), padRoom[i]->load());
     if (smpl != nullptr && padLayer[i]->load() > 0.5f)   // LAYER: the synth plays underneath the WAV
     {
         DrumVoice* second = nullptr;
         for (auto& vc : voices) if (! vc.active() && &vc != pick) { second = &vc; break; }
         if (second != nullptr)
             second->trigger (pad, vel, patch, padTune[i]->load(), padDecay[i]->load(), padLevel[i]->load(), nullptr,
-                             (float) getSampleRate(), sampleClock, (juce::uint32) rng.nextInt(), padEcho[i]->load(), padSpace[i]->load());
+                             (float) getSampleRate(), sampleClock, (juce::uint32) rng.nextInt(), padEcho[i]->load(), padSpace[i]->load(),
+                             rs, padReal[i]->load(), padRoom[i]->load());
     }
     hitVel[i].store (vel);
     hitCount[i].fetch_add (1);

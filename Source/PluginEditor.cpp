@@ -555,6 +555,8 @@ KickLab::KickLab (ShuffleBuddyProcessor& p, LcdDisplay& l) : proc (p), lcd (l)
     knob ("kknockf", "KNOCK HZ", toy::green).setTooltip ("Pitch of the knock");
     knob ("kduck", "DUCK", toy::squashCol).setTooltip ("Every kick pushes the rest of the kit and the FX down, then lets them swell back: built-in sidechain pump");
     knob ("krumble", "RUMBLE", toy::spaceCol).setTooltip ("A dark, low-passed reverb tail that pumps between kicks: dub techno / warehouse rumble");
+    knob ("kreal", "REAL KICK", toy::olive).setTooltip ("A recorded acoustic kick (with its snare buzzing) under the synth: depth and air no synth has");
+    knob ("kroom", "ROOM MIC", toy::teal).setTooltip ("The real room mic from that recording: a natural space around the kick");
 
     auto btn = [this] (juce::TextButton& b, juce::Colour c, juce::Colour txt, const juce::String& tip)
     {
@@ -658,12 +660,12 @@ void KickLab::timerCallback()
     for (int i = 0; i < 4; ++i) clickBtns[i].setToggleState (i == ct, juce::dontSendNotification);
     for (int i = 0; i < 6; ++i) lenBtns[i].setToggleState (i == len, juce::dontSendNotification);
     layerBtn.setToggleState (pv ("layer1") > 0.5f, juce::dontSendNotification);
-    layerBtn.setButtonText (proc.samplePath (Kick).isEmpty() ? "WAV LAYER (DROP A WAV ON THE KICK PAD)" : (pv ("layer1") > 0.5f ? "WAV LAYER: ON" : "WAV LAYER: OFF"));
+    layerBtn.setButtonText (proc.samplePath (Kick).isEmpty() ? "YOUR WAV: DROP ONE ON THE KICK PAD" : (pv ("layer1") > 0.5f ? "YOUR WAV LAYER: ON" : "YOUR WAV LAYER: OFF"));
     // re-draw the scope only when something that shapes the kick changed
     const char* ids[] = { "kwave", "kfreq", "kkey", "kstart", "kpdec", "kcurve", "khold", "kdecay", "kdrive", "kclick", "kctype", "kctone",
-                          "ksub", "ksubdec", "kknock", "kknockf", "klen", "tune1", "decay1", "tempo" };
+                          "ksub", "ksubdec", "kknock", "kknockf", "klen", "tune1", "decay1", "tempo", "kreal", "kroom" };
     double h = 0.0;
-    for (int i = 0; i < 20; ++i) h += (double) pv (ids[i]) * (1.0 + i * 0.6180339);
+    for (int i = 0; i < 22; ++i) h += (double) pv (ids[i]) * (1.0 + i * 0.6180339);
     if (h != lastHash) { lastHash = h; renderScope(); refreshNames(); repaint (scopeArea); }
 }
 
@@ -675,7 +677,8 @@ void KickLab::renderScope()
     for (auto& b : bufs) std::fill (b.begin(), b.end(), 0.0f);
     const auto patch = proc.kickPatch (proc.apvts.getRawParameterValue ("tempo")->load());
     DrumVoice v;
-    v.trigger (Kick, 1.0f, patch, proc.apvts.getRawParameterValue ("tune1")->load(), proc.apvts.getRawParameterValue ("decay1")->load(), 1.0f, nullptr, sr, 0, 12345u);
+    v.trigger (Kick, 1.0f, patch, proc.apvts.getRawParameterValue ("tune1")->load(), proc.apvts.getRawParameterValue ("decay1")->load(), 1.0f, nullptr, sr, 0, 12345u,
+               0.0f, 0.0f, proc.realSet (patch.real), proc.apvts.getRawParameterValue ("real1")->load(), proc.apvts.getRawParameterValue ("room1")->load());
     v.render (bufs[0].data(), bufs[1].data(), bufs[2].data(), bufs[3].data(), bufs[4].data(), bufs[5].data(), bufs[6].data(), bufs[7].data(), 0, n);
     const int cols = juce::jmax (10, scopeArea.getWidth() - 20);
     scopeMin.assign ((size_t) cols, 0.0f); scopeMax.assign ((size_t) cols, 0.0f); pitchLine.assign ((size_t) cols, 0.0f);
@@ -744,8 +747,8 @@ void KickLab::paint (juce::Graphics& g)
     g.drawText ("SUB LAYER", 560, 108, 190, 14, juce::Justification::centred);
     g.drawText ("BODY", 20, 230, 60, 18, juce::Justification::centredLeft);
     g.drawText ("KNOCK", 16, 362, 200, 14, juce::Justification::centred);
-    g.drawText ("LENGTH (LOCKS TO TEMPO)", 230, 362, 300, 14, juce::Justification::centred);
-    g.drawText ("MIX", 550, 362, 200, 14, juce::Justification::centred);
+    g.drawText ("LENGTH (LOCKS TO TEMPO)", 216, 362, 260, 14, juce::Justification::centred);
+    g.drawText ("MIX + REAL LAYER", 482, 362, 272, 14, juce::Justification::centred);
     g.setColour (toy::brown.withAlpha (0.25f));
     g.fillRoundedRectangle (16, 222, (float) getWidth() - 32, 2, 1);
     g.fillRoundedRectangle (16, 354, (float) getWidth() - 32, 2, 1);
@@ -762,7 +765,8 @@ void KickLab::resized()
     auto place = [this] (size_t i, int x, int y, int w)
     {
         if (i >= knobs.size()) return;
-        knobs[i].s->setBounds (x + (w - 70) / 2, y, 70, 66);
+        const int kw = juce::jmin (70, w);
+        knobs[i].s->setBounds (x + (w - kw) / 2, y, kw, 66);
         knobs[i].l->setBounds (x, y + 64, w, 16);
     };
     place (7, 364, 124, 96); place (8, 462, 124, 96);    // click, tone
@@ -771,9 +775,10 @@ void KickLab::resized()
     keyBtn.setBounds (402, 224, 170, 32);
     for (size_t i = 0; i < 7; ++i) place (i, 16 + (int) i * 105, 262, 100);
     place (11, 16, 380, 96); place (12, 116, 380, 96);   // knock
-    for (int i = 0; i < 6; ++i) lenBtns[i].setBounds (230 + i * 50, 384, 46, 32);
-    layerBtn.setBounds (230, 424, 296, 32);
-    place (13, 550, 380, 96); place (14, 650, 380, 96);  // duck, rumble
+    for (int i = 0; i < 6; ++i) lenBtns[i].setBounds (216 + i * 44, 384, 41, 32);
+    layerBtn.setBounds (216, 424, 260, 32);
+    place (13, 482, 380, 68); place (14, 550, 380, 68);  // duck, rumble
+    place (15, 618, 380, 68); place (16, 686, 380, 68);  // real kick, room mic
 }
 
 // ================================================================ editor
@@ -1065,10 +1070,10 @@ void ShuffleBuddyEditor::selectPad (int pad)
     // rebuild the three pad knobs for this pad
     for (auto& k : padKnobs) { removeChildComponent (k.s.get()); removeChildComponent (k.name.get()); }
     padKnobs.clear();
-    const char* ids[] = { "tune", "decay", "lvl", "esend", "ssend" };
-    const char* names[] = { "TUNE", "DECAY", "LEVEL", "ECHO", "SPACE" };
-    const juce::Colour cols[] = { toy::padColour (pad), toy::padColour (pad), toy::padColour (pad), toy::echoCol, toy::spaceCol };
-    for (int i = 0; i < 5; ++i)
+    const char* ids[] = { "tune", "decay", "lvl", "real", "room", "esend", "ssend" };
+    const char* names[] = { "TUNE", "DECAY", "LEVEL", "REAL", "ROOM", "ECHO", "SPACE" };
+    const juce::Colour cols[] = { toy::padColour (pad), toy::padColour (pad), toy::padColour (pad), toy::olive, toy::teal, toy::echoCol, toy::spaceCol };
+    for (int i = 0; i < 7; ++i)
     {
         Knob k;
         k.id = ShuffleBuddyProcessor::pid (ids[i], pad);
@@ -1076,13 +1081,15 @@ void ShuffleBuddyEditor::selectPad (int pad)
         k.s->setColour (juce::Slider::rotarySliderFillColourId, cols[i]);
         k.s->setComponentID (k.id);
         k.s->addMouseListener (this, false);
-        if (i >= 3) k.s->setTooltip (juce::String ("How much ") + ShuffleBuddyProcessor::padName (pad) + (i == 3 ? " goes into the echo" : " goes into the space reverb"));
+        if (i == 3) k.s->setTooltip ("How much of the recorded drum (real kit, close mic) sits under the synth. 100% = as designed");
+        if (i == 4) k.s->setTooltip ("Room around this sound: the real room mic plus the small synth room. 100% = as designed");
+        if (i >= 5) k.s->setTooltip (juce::String ("How much ") + ShuffleBuddyProcessor::padName (pad) + (i == 5 ? " goes into the echo" : " goes into the space reverb"));
         k.s->setWantsKeyboardFocus (false);
         k.s->setDoubleClickReturnValue (true, proc.apvts.getParameter (k.id)->convertFrom0to1 (proc.apvts.getParameter (k.id)->getDefaultValue()));
         k.att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, k.id, *k.s);
         k.s->onValueChange = [this] { lcd.padShownAt = juce::Time::getMillisecondCounter(); };
         k.name = std::make_unique<juce::Label> (k.id, names[i]);
-        k.name->setFont (toy::font (12.0f));
+        k.name->setFont (toy::font (11.0f));
         k.name->setColour (juce::Label::textColourId, toy::brown);
         k.name->setJustificationType (juce::Justification::centred);
         addAndMakeVisible (*k.s);
@@ -1333,8 +1340,8 @@ void ShuffleBuddyEditor::resized()
     kitsBtn.setBounds (590, 52, 120, 50);
     for (size_t i = 0; i < padKnobs.size(); ++i)
     {
-        padKnobs[i].s->setBounds (60 + (int) i * 70, 326, 58, 48);
-        padKnobs[i].name->setBounds (52 + (int) i * 70, 372, 74, 16);
+        padKnobs[i].s->setBounds (56 + (int) i * 51, 326, 50, 46);
+        padKnobs[i].name->setBounds (50 + (int) i * 51, 372, 62, 16);
     }
     if (lab != nullptr) lab->setBounds (432, 136, 768, 474);
 

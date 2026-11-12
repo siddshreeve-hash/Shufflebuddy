@@ -37,6 +37,10 @@ struct Svf   // TPT state-variable filter: lp / bp / hp
 };
 
 
+// Real recorded hits (close mic + stereo room mic), a few velocity layers and round robins each
+struct RealClip { juce::AudioBuffer<float> buf; int vel = 0; };   // ch0 close, ch1/2 room L/R
+struct RealSet  { juce::String name; std::vector<RealClip> clips; };
+
 struct Patch
 {
     // pitched body: osc with a pitch sweep (start = sweep x freq, falling over 'drop')
@@ -61,6 +65,9 @@ struct Patch
     float lpHz = 20000.0f, hpHz = 0.0f;   // tone: dark tops (Burial) and no mud
     float crush = 0.0f;       // sampler grit: lower sample rate + fewer bits (0.5 ~ 12-bit, 26 kHz)
     float room = 0.0f;        // a small room around every hit (early reflections)
+    float roomSize = 1.0f;    // 0.5 = closet, 1 = small room, 2 = big room; also darker as it grows
+    int   real = -1;          // index of a RealSet layered underneath (-1 = none)
+    float realMix = 0.0f, realRoom = 0.6f, realTune = 0.0f;   // level, room-mic level, semitones
     int   grains = 0;         // >0: noise comes as random little grains (rattles, shuffles, foley)
     float grainSpread = 0.06f, grainDecay = 0.006f;
     float gain = 1.0f;
@@ -74,7 +81,8 @@ public:
     juce::int64 startedAt() const { return started; }
 
     void trigger (int p, float vel, const Patch& patch, float tuneSemis, float decay, float level, const SampleData* sample,
-                  float sr, juce::int64 now, juce::uint32 seed, float echoSend = 0.0f, float spaceSend = 0.0f)
+                  float sr, juce::int64 now, juce::uint32 seed, float echoSend = 0.0f, float spaceSend = 0.0f,
+                  const RealSet* realSet = nullptr, float realScale = 1.0f, float roomScale = 1.0f)
     {
         padId = p; on = true; started = now; fs = sr; t = 0;
         sendE = echoSend; sendS = spaceSend;
@@ -87,7 +95,7 @@ public:
         for (auto& ph : ph6) ph = 0.0;
         ph0 = ph2 = phM = phK = 0.0;
         fN.reset(); fM.reset(); fC.reset(); lpState = 0; hpM = 0; hpN = 0; clickLp = 0;
-        doneAt = -1;
+        doneAt = -1; realBuf = nullptr; roomOutL = roomOutR = 0.0f;
         fade = 1.0f; fadeC = std::exp (-1.0f / ((smp != nullptr ? 0.008f : juce::jmax (0.002f, patch.gateFade)) * sr)); gateN = 1 << 30; holdN = 0; attN = 1;
         subA = knA = meA = noA = 0.0f;
 
@@ -130,8 +138,33 @@ public:
             crushLv = std::exp2 (16.0f - 8.0f * P.crush);
             crushPh = 0.0f; crushHeld = 0.0f;
             std::fill (roomBuf.begin(), roomBuf.end(), 0.0f); roomW = 0; roomLp = 0.0f;
-            for (int k = 0; k < 4; ++k) roomTap[(size_t) k] = juce::jmin ((int) roomBuf.size() - 1, (int) (fs * (0.011f + 0.0065f * (float) k * (1.0f + 0.15f * (float) k)))) ;
-            roomTail = P.room > 0.0f ? (int) (0.06f * fs) : 0;
+            P.room *= roomScale;
+            for (int k = 0; k < 4; ++k)   // every sound has its own room size, and every hit lands slightly differently in it
+            {
+                const float base = (0.0045f + 0.0075f * (float) k * (1.0f + 0.2f * (float) k)) * P.roomSize;
+                const float jitter = 1.0f + 0.07f * noise();
+                roomTap[(size_t) k] = juce::jlimit (16, (int) roomBuf.size() - 1, (int) (fs * base * jitter));
+            }
+            roomFb = juce::jlimit (0.2f, 0.62f, 0.3f + 0.16f * P.roomSize);
+            roomDamp = juce::jlimit (0.12f, 0.6f, 0.5f - 0.17f * P.roomSize);
+            roomTail = P.room > 0.0f ? (int) ((0.04f + 0.06f * P.roomSize) * fs) : 0;
+            // real recorded layer: velocity picks the layer, round robin picks the take
+            realBuf = nullptr; realPos = 0.0;
+            if (realSet != nullptr && ! realSet->clips.empty() && P.realMix * realScale > 0.0f)
+            {
+                const int layer = v < 0.45f ? 0 : (v < 0.8f ? 1 : 2);
+                int cands[16]; int nc = 0;
+                for (int k = 0; k < (int) realSet->clips.size() && nc < 16; ++k) if (realSet->clips[(size_t) k].vel == layer) cands[nc++] = k;
+                if (nc == 0) for (int k = 0; k < (int) realSet->clips.size() && nc < 16; ++k) cands[nc++] = k;
+                const int pickK = cands[(int) ((0.5f * (noise() + 1.0f)) * (float) nc) % nc];
+                realBuf = &realSet->clips[(size_t) pickK].buf;
+                realRate = 44100.0 / fs * tune * std::exp2 (P.realTune / 12.0f);
+                realGainC = P.realMix * realScale;
+                realGainR = P.realRoom * roomScale * P.realMix * juce::jmax (0.35f, realScale);
+                if (decay < 0.99f) realEnvC = coef (0.08f + decay * decay * 1.6f); else realEnvC = 1.0f;
+                realEnv = 1.0f;
+            }
+            roomOutL = roomOutR = 0.0f;
             const float spread = P.grainSpread * dm;
             for (int k = 0; k < juce::jmin (16, P.grains); ++k) { grainT[(size_t) k] = (k == 0 ? 0.0f : (0.5f * (noise() + 1.0f)) * spread * fs); grainA[(size_t) k] = 0.45f + 0.55f * (0.5f * (noise() + 1.0f)); }
             grainK = 1.0f / juce::jmax (1.0f, P.grainDecay * fs);
@@ -155,7 +188,7 @@ public:
             const float s = smp != nullptr ? nextSample() : nextSynth();
             lpState += (s - lpState) * ghostLp;
             const float o = lpState * gain * v;
-            const float l = o * panL, r = o * panR;
+            const float l = o * panL + roomOutL * gain * v, r = o * panR + roomOutR * gain * v;
             dL[i] += l; dR[i] += r;
             EL[i] += l * sendE; ER[i] += r * sendE;
             SL[i] += l * sendS; SR[i] += r * sendS;
@@ -169,6 +202,7 @@ private:
         if (smp != nullptr) return amp < 0.0005f;
         const bool envDone = amp < 0.0005f && subA < 0.0005f && knA < 0.0005f && meA < 0.0005f && noA < 0.0005f && t > (juce::int64) holdN + attN
                              && (P.grains == 0 || t > (juce::int64) (P.grainSpread * fs * 4.0f));
+        if (realBuf != nullptr) return false;
         if (! envDone) { doneAt = -1; return false; }
         if (doneAt < 0) doneAt = t;
         return t - doneAt > roomTail;
@@ -301,6 +335,24 @@ private:
         // ---- attack + gate
         if (t < attN) out *= tf / (float) attN;
         if (t > gateN) { fade *= fadeC; out *= fade; }
+        // ---- real recorded layer: close mic joins the synth (and its character), room mic stays stereo and natural
+        roomOutL = roomOutR = 0.0f;
+        if (realBuf != nullptr)
+        {
+            const int len = realBuf->getNumSamples();
+            const int i0 = (int) realPos;
+            if (i0 >= len - 1) realBuf = nullptr;
+            else
+            {
+                const float fr = (float) (realPos - i0);
+                auto rd = [&] (int ch) { const float* d = realBuf->getReadPointer (ch); return d[i0] + (d[i0 + 1] - d[i0]) * fr; };
+                const float env = realEnv * (t > gateN ? fade : 1.0f);
+                out += rd (0) * realGainC * env;
+                if (realBuf->getNumChannels() >= 3) { roomOutL = rd (1) * realGainR * env; roomOutR = rd (2) * realGainR * env; }
+                realPos += realRate; realEnv *= realEnvC;
+                if (realEnv < 0.0005f) realBuf = nullptr;
+            }
+        }
         // ---- character: sampler grit -> tone -> room
         if (P.crush > 0.0f)
         {
@@ -315,8 +367,8 @@ private:
             const int sz = (int) roomBuf.size();
             auto rd = [&] (int tap) { int i = roomW - tap; if (i < 0) i += sz; return roomBuf[(size_t) i]; };
             float r = rd (roomTap[0]) * 0.55f + rd (roomTap[1]) * 0.45f - rd (roomTap[2]) * 0.38f + rd (roomTap[3]) * 0.3f;
-            roomLp += (r - roomLp) * 0.35f;
-            roomBuf[(size_t) roomW] = out + roomLp * 0.42f;
+            roomLp += (r - roomLp) * roomDamp;
+            roomBuf[(size_t) roomW] = out + roomLp * roomFb;
             if (++roomW >= sz) roomW = 0;
             out += roomLp * P.room * 1.3f;
         }
@@ -339,7 +391,10 @@ private:
     std::array<float, 4096> roomBuf {};
     int roomW = 0, roomTail = 0;
     std::array<int, 4> roomTap {};
-    float roomLp = 0.0f, grainK = 0.1f;
+    float roomLp = 0.0f, grainK = 0.1f, roomFb = 0.42f, roomDamp = 0.35f, roomOutL = 0.0f, roomOutR = 0.0f;
+    const juce::AudioBuffer<float>* realBuf = nullptr;
+    double realPos = 0.0, realRate = 1.0;
+    float realGainC = 0.0f, realGainR = 0.0f, realEnv = 1.0f, realEnvC = 1.0f;
     std::array<float, 16> grainT {}, grainA {};
     double ph0 = 0, ph2 = 0, phM = 0, phK = 0;
     std::array<double, 6> ph6 {};
