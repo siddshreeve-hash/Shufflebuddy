@@ -67,7 +67,8 @@ public:
         const float vd = 0.6f + 0.4f * v;
         switch (p)
         {
-            case Kick:    ampC = timeCoef ((0.08f + dec * 0.5f) * vd); pitchC = timeCoef (0.032f); break;
+            case Kick:    ampC = timeCoef ((0.05f + dec * 0.16f) * vd); pitchC = timeCoef (0.026f);
+                          gateAt = (int) ((0.09f + dec * 0.45f) * vd * fs); gateC = timeCoef (0.012f); break;   // tight: short body, then a fast gate so no boom lingers
             case Snare:   ampC = timeCoef (0.06f * vd); noiseC = timeCoef ((0.05f + dec * 0.25f) * vd);
                           f1.set (1900.0f * tune, 0.9f, fs); break;
             case Clap:    noiseC = timeCoef ((0.05f + dec * 0.25f) * vd); f1.set (1150.0f * tune, 1.6f, fs); break;
@@ -139,7 +140,7 @@ private:
                 const float body = std::tanh (1.7f * std::sin (twoPi * (float) phases[0])) * 0.85f;
                 const float click = t < (int) (0.004f * fs) ? noise() * 0.35f * bright * (1.0f - ts / 0.004f) : 0.0f;
                 out = body * amp + click;
-                amp *= ampC;
+                amp *= t > gateAt ? ampC * gateC : ampC;
                 break;
             }
             case Snare:
@@ -221,6 +222,7 @@ private:
     int padId = 0;
     juce::int64 started = 0;
     float fs = 48000.0f, v = 1.0f, bright = 1.0f, gain = 1.0f, tune = 1.0f, dec = 0.5f;
+    int gateAt = 1 << 30; float gateC = 1.0f;
     float amp = 1.0f, ampC = 0.999f, noiseAmp = 1.0f, noiseC = 0.999f, pitchEnv = 1.0f, pitchC = 0.99f;
     float sendE = 0.0f, sendS = 0.0f;
     float ghostLp = 1.0f, lpState = 0.0f, hpState = 0.0f, hpIn = 0.0f, panL = 1.0f, panR = 1.0f;

@@ -47,7 +47,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShuffleBuddyProcessor::creat
         add (new APF ({ pid ("push", i), 1 }, n + " push", NR (-20.0f, 30.0f, 0.5f), 0.0f,
                       fmt ([] (float x) { return (x > 0 ? "+" : "") + juce::String (juce::roundToInt (x)) + "ms"; })));
         static const float eDef[NumPads] = { 0.0f, 0.35f, 0.3f, 0.45f, 0.05f, 0.1f, 0.4f, 0.0f };
-        static const float sDef[NumPads] = { 0.05f, 0.3f, 0.35f, 0.2f, 0.1f, 0.2f, 0.25f, 0.1f };
+        static const float sDef[NumPads] = { 0.0f, 0.3f, 0.35f, 0.2f, 0.1f, 0.2f, 0.25f, 0.1f };
         add (new APF ({ pid ("esend", i), 1 }, n + " echo send", NR (0.0f, 1.0f), eDef[i], fmt (pct)));
         add (new APF ({ pid ("ssend", i), 1 }, n + " space send", NR (0.0f, 1.0f), sDef[i], fmt (pct)));
     }
