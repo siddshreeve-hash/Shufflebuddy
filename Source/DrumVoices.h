@@ -57,6 +57,12 @@ struct Patch
     float gateFade = 0.008f;
     float attack = 0.0f;      // seconds (shakers, brushes)
     float velPitch = 0.3f;    // how much softer hits lose pitch sweep
+    // ---- character: what makes a synth hit sound like a hit sampled off a record
+    float lpHz = 20000.0f, hpHz = 0.0f;   // tone: dark tops (Burial) and no mud
+    float crush = 0.0f;       // sampler grit: lower sample rate + fewer bits (0.5 ~ 12-bit, 26 kHz)
+    float room = 0.0f;        // a small room around every hit (early reflections)
+    int   grains = 0;         // >0: noise comes as random little grains (rattles, shuffles, foley)
+    float grainSpread = 0.06f, grainDecay = 0.006f;
     float gain = 1.0f;
 };
 
@@ -81,6 +87,7 @@ public:
         for (auto& ph : ph6) ph = 0.0;
         ph0 = ph2 = phM = phK = 0.0;
         fN.reset(); fM.reset(); fC.reset(); lpState = 0; hpM = 0; hpN = 0; clickLp = 0;
+        doneAt = -1;
         fade = 1.0f; fadeC = std::exp (-1.0f / ((smp != nullptr ? 0.008f : juce::jmax (0.002f, patch.gateFade)) * sr)); gateN = 1 << 30; holdN = 0; attN = 1;
         subA = knA = meA = noA = 0.0f;
 
@@ -117,6 +124,18 @@ public:
             fM.set (P.metalBp, 1.2f, fs);
             fC.set (2400.0f + 4500.0f * P.clickTone, 1.4f, fs);
             hpMc = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * P.metalHp / fs);
+            lpC = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * juce::jmin (P.lpHz, fs * 0.45f) / fs);
+            hpC = P.hpHz > 0.0f ? 1.0f - std::exp (-juce::MathConstants<float>::twoPi * P.hpHz / fs) : 0.0f;
+            crushStep = 1.0f + P.crush * 1.6f * (fs / 44100.0f);           // hold each sample this long
+            crushLv = std::exp2 (16.0f - 8.0f * P.crush);
+            crushPh = 0.0f; crushHeld = 0.0f;
+            std::fill (roomBuf.begin(), roomBuf.end(), 0.0f); roomW = 0; roomLp = 0.0f;
+            for (int k = 0; k < 4; ++k) roomTap[(size_t) k] = juce::jmin ((int) roomBuf.size() - 1, (int) (fs * (0.011f + 0.0065f * (float) k * (1.0f + 0.15f * (float) k)))) ;
+            roomTail = P.room > 0.0f ? (int) (0.06f * fs) : 0;
+            const float spread = P.grainSpread * dm;
+            for (int k = 0; k < juce::jmin (16, P.grains); ++k) { grainT[(size_t) k] = (k == 0 ? 0.0f : (0.5f * (noise() + 1.0f)) * spread * fs); grainA[(size_t) k] = 0.45f + 0.55f * (0.5f * (noise() + 1.0f)); }
+            grainK = 1.0f / juce::jmax (1.0f, P.grainDecay * fs);
+            lpS1 = lpS2 = hpS = 0.0f;
             driveK = 1.0f + 8.0f * P.drive * P.drive;
             driveN = 1.0f / std::tanh (driveK);
         }
@@ -145,10 +164,14 @@ public:
     }
 
 private:
-    bool finished() const
+    bool finished()
     {
         if (smp != nullptr) return amp < 0.0005f;
-        return amp < 0.0005f && subA < 0.0005f && knA < 0.0005f && meA < 0.0005f && noA < 0.0005f && t > (juce::int64) holdN + attN;
+        const bool envDone = amp < 0.0005f && subA < 0.0005f && knA < 0.0005f && meA < 0.0005f && noA < 0.0005f && t > (juce::int64) holdN + attN
+                             && (P.grains == 0 || t > (juce::int64) (P.grainSpread * fs * 4.0f));
+        if (! envDone) { doneAt = -1; return false; }
+        if (doneAt < 0) doneAt = t;
+        return t - doneAt > roomTail;
     }
     float noise() { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return (float) (int) rng * (1.0f / 2147483648.0f); }
 
@@ -238,7 +261,7 @@ private:
             meA *= meC;
         }
         // ---- noise (with clap bursts)
-        if (noA > 0.0005f || (P.bursts > 1 && tf < P.burstGap * fs * (float) P.bursts))
+        if (noA > 0.0005f || (P.bursts > 1 && tf < P.burstGap * fs * (float) P.bursts) || (P.grains > 0 && tf < P.grainSpread * fs * 4.0f))
         {
             float e = noA;
             if (P.bursts > 1)
@@ -248,6 +271,13 @@ private:
                 e = 0.0f;
                 for (int b = 0; b < P.bursts; ++b) { const float d = ms - (float) b * gap; if (d >= 0.0f && d < gap) e = juce::jmax (e, std::exp (-d / 2.8f)); }
                 if (ms >= tailStart) { e = juce::jmax (e, noA); noA *= noC; }
+            }
+            else if (P.grains > 0)
+            {
+                float gsum = 0.0f;
+                for (int k = 0; k < juce::jmin (16, P.grains); ++k) { const float d = tf - grainT[(size_t) k]; if (d >= 0.0f) gsum += grainA[(size_t) k] * std::exp (-d * grainK); }
+                e = juce::jmin (1.2f, gsum) * (0.35f + 0.65f * noA);
+                noA *= noC;
             }
             else noA *= noC;
             fN.run (noise(), lp, bp, hp);
@@ -271,6 +301,25 @@ private:
         // ---- attack + gate
         if (t < attN) out *= tf / (float) attN;
         if (t > gateN) { fade *= fadeC; out *= fade; }
+        // ---- character: sampler grit -> tone -> room
+        if (P.crush > 0.0f)
+        {
+            crushPh += 1.0f;
+            if (crushPh >= crushStep) { crushPh -= crushStep; crushHeld = std::round (out * crushLv) / crushLv; }
+            out = crushHeld;
+        }
+        if (P.lpHz < 19000.0f) { lpS1 += (out - lpS1) * lpC; lpS2 += (lpS1 - lpS2) * lpC; out = lpS2; }
+        if (hpC > 0.0f) { hpS += (out - hpS) * hpC; out -= hpS; }
+        if (P.room > 0.0f)
+        {
+            const int sz = (int) roomBuf.size();
+            auto rd = [&] (int tap) { int i = roomW - tap; if (i < 0) i += sz; return roomBuf[(size_t) i]; };
+            float r = rd (roomTap[0]) * 0.55f + rd (roomTap[1]) * 0.45f - rd (roomTap[2]) * 0.38f + rd (roomTap[3]) * 0.3f;
+            roomLp += (r - roomLp) * 0.35f;
+            roomBuf[(size_t) roomW] = out + roomLp * 0.42f;
+            if (++roomW >= sz) roomW = 0;
+            out += roomLp * P.room * 1.3f;
+        }
         ++t;
         return out * P.gain;
     }
@@ -285,7 +334,13 @@ private:
     int holdN = 0, gateN = 1 << 30, attN = 1;
     float sendE = 0.0f, sendS = 0.0f;
     float ghostLp = 1.0f, lpState = 0.0f, hpM = 0.0f, hpMc = 0.5f, hpN = 0.0f, clickLp = 0.0f, panL = 1.0f, panR = 1.0f;
-    juce::int64 t = 0;
+    juce::int64 t = 0, doneAt = -1;
+    float lpC = 1.0f, hpC = 0.0f, lpS1 = 0, lpS2 = 0, hpS = 0, crushStep = 1.0f, crushLv = 65536.0f, crushPh = 0, crushHeld = 0;
+    std::array<float, 4096> roomBuf {};
+    int roomW = 0, roomTail = 0;
+    std::array<int, 4> roomTap {};
+    float roomLp = 0.0f, grainK = 0.1f;
+    std::array<float, 16> grainT {}, grainA {};
     double ph0 = 0, ph2 = 0, phM = 0, phK = 0;
     std::array<double, 6> ph6 {};
     Svf fN, fM, fC;

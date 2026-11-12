@@ -19,7 +19,7 @@ int main (int argc, char** argv)
     ed->setVisible (true);
     if (argc > 2 && juce::String (argv[2]) == "lab")
     {
-        proc.applyKit (4);   // dub techno: shows rumble + duck
+        proc.applyKit (5);   // dub techno: shows rumble + duck
         ed->keyPressed (juce::KeyPress ('k', {}, 'k'));
     }
     juce::MessageManager::getInstance()->runDispatchLoopUntil (120);

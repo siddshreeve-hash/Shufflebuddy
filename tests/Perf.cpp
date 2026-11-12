@@ -22,7 +22,7 @@ int main()
         ShuffleBuddyProcessor proc; proc.setPlayConfigDetails (0, 2, sr, bs);
         auto set = [&] (const char* id, float v) { auto* p = proc.apvts.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
         proc.applyStyleFeel (2);   // funk: busiest pattern
-        set ("slot", 2); set ("ghosts", 1); set ("variety", 1); set ("dust", 1); set ("play", 1); set ("squash", 1); set ("throw", 1); set ("space", 1); set ("echo", 1); set ("fxfilter", -0.6f); set ("chain", 2); proc.applyKit (9); set ("layer1", 1);
+        set ("slot", 2); set ("ghosts", 1); set ("variety", 1); set ("dust", 1); set ("play", 1); set ("squash", 1); set ("throw", 1); set ("space", 1); set ("echo", 1); set ("fxfilter", -0.6f); set ("chain", 2); proc.applyKit (10); set ("layer1", 1);
         proc.prepareToPlay (sr, bs);
         juce::AudioBuffer<float> b (2, bs); juce::MidiBuffer m; m.ensureSize (2048);
         std::vector<double> t; t.reserve (40000); long total = 0; const int blocks = (int) (sr * 20 / bs);
