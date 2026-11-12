@@ -22,6 +22,9 @@ int main (int argc, char** argv)
         else if (k == "roll") { juce::Random r (v.getLargeIntValue()); proc.setGrid (proc.currentSlot(), groove::roll ((int) proc.apvts.getRawParameterValue ("style")->load(), r)); }
         else if (k == "straight") { set ("swing", 50); set ("loosen", 0); set ("ghosts", 0); set ("variety", 0); for (int p = 0; p < NumPads; ++p) set (ShuffleBuddyProcessor::pid ("push", p), 0); }
         else if (k == "fillbar") fillBar = v.getIntValue();
+        else if (k == "kick") proc.applyKickPreset (v.getIntValue());
+        else if (k == "kit") proc.applyKit (v.getIntValue());
+        else if (k == "surprise") { for (int q = 0; q < v.getIntValue(); ++q) proc.surpriseKick(); }
         else if (k == "throwbar") throwBar = v.getIntValue();
         else if (k == "sweepbar") sweepBar = v.getIntValue();
         else if (k == "tail") tailSec = v.getDoubleValue();

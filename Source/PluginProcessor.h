@@ -10,6 +10,7 @@
 #include "DubDelay.h"
 #include "DubReverb.h"
 #include "FxFilter.h"
+#include "SoundLibrary.h"
 
 class ShuffleBuddyProcessor : public juce::AudioProcessor, private juce::Timer
 {
@@ -52,6 +53,14 @@ public:
     int currentSlot() const { return (int) apvts.getRawParameterValue ("slot")->load(); }
     int playingSlot() const { return playSlotNow.load(); }
 
+    // ---- sounds
+    Patch kickPatch (double bpm) const;
+    void applyKickPreset (int index);
+    void applyKit (int index);
+    void surpriseKick();
+    void setParamValue (const juce::String& id, float value);
+    juce::String kickName { "Garage Thud" }, kitName { "2-Step Classic" };
+
     void pushUndo (int slot);
     bool undo();
     bool canUndo() const { return ! history.empty(); }
@@ -92,7 +101,7 @@ private:
     std::array<Slot, 256> slots {};
     static juce::uint32 fnv (const char* s) { juce::uint32 h = 2166136261u; while (*s) { h ^= (juce::uint8) *s++; h *= 16777619u; } return h | 1u; }
     float p (const char* id) const { const auto h = fnv (id); size_t i = h & 255u; while (slots[i].h != h) i = (i + 1) & 255u; return slots[i].raw->load(); }
-    std::array<std::atomic<float>*, NumPads> padLevel {}, padTune {}, padDecay {}, padPush {}, padEcho {}, padSpace {};
+    std::array<std::atomic<float>*, NumPads> padLevel {}, padTune {}, padDecay {}, padPush {}, padEcho {}, padSpace {}, padLayer {}, padSnd {};
 
     std::array<std::array<std::array<std::atomic<juce::uint8>, groove::numSteps>, NumPads>, groove::numSlots> cells;
     std::vector<std::pair<int, groove::Grid>> history;
@@ -116,7 +125,12 @@ private:
     juce::Random rng, uiRng;
 
     static constexpr int maxChunk = 512;
-    juce::AudioBuffer<float> eBuf, sBuf;
+    juce::AudioBuffer<float> eBuf, sBuf, kBuf, rBuf;
+    int rumbleTail = 0;
+    DubReverb rumbleVerb;
+    Svf rumbleLp1, rumbleLp2;
+    float duckEnv = 0.0f; int duckHold = 0;
+    Patch kickNow;
     DubDelay echo;
     DubReverb space;
     FxFilter fxFilter;

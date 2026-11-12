@@ -111,6 +111,35 @@ private:
     bool down = false;
 };
 
+// KICK LAB: a full kick synthesiser that opens over the step grid
+class KickLab : public juce::Component, private juce::Timer
+{
+public:
+    KickLab (ShuffleBuddyProcessor&, LcdDisplay&);
+    ~KickLab() override;
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    std::function<void()> onClose, onChanged;
+    std::vector<juce::Component*> learnables();
+    void refreshNames();
+
+private:
+    void timerCallback() override;
+    juce::Slider& knob (const juce::String& id, const juce::String& label, juce::Colour c);
+    void renderScope();
+    struct K { std::unique_ptr<juce::Slider> s; std::unique_ptr<juce::Label> l; std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> a; juce::String id; };
+    ShuffleBuddyProcessor& proc;
+    LcdDisplay& lcd;
+    std::vector<K> knobs;
+    juce::TextButton waveBtns[3], clickBtns[4], lenBtns[6];
+    juce::TextButton presetBtn, keyBtn, surpriseBtn { "SURPRISE ME" }, hitBtn { "HIT" }, closeBtn { "X" }, layerBtn { "WAV LAYER" };
+    std::vector<float> scopeMin, scopeMax, pitchLine;
+    std::vector<float> bufs[8];
+    double lastHash = -1.0;
+    float gateX = -1.0f;
+    juce::Rectangle<int> scopeArea;
+};
+
 class ShuffleBuddyEditor : public juce::AudioProcessorEditor, private juce::Timer, public juce::FileDragAndDropTarget
 {
 public:
@@ -134,6 +163,9 @@ private:
     void learnMenu (const juce::String& paramId, juce::Component* target);
     void refreshMappings();
     void doUndo();
+    void soundMenu();
+    void kitsMenu();
+    void showLab (bool);
 
     ShuffleBuddyProcessor& proc;
     ToyLookAndFeel lnf;
@@ -151,6 +183,8 @@ private:
     juce::TextButton undoBtn { "UNDO" }, chainBtn { "CHAIN" }, throwBtn { "THROW" };
     juce::TextButton timeBtns[4], typeBtns[3];
     FxMeter grMeter, echoLed;
+    juce::TextButton soundBtn, labBtn { "KICK LAB" }, kitsBtn { "KITS" };
+    std::unique_ptr<KickLab> lab;
     int lastMapVersion = -1, lastLearn = -2;
     juce::Label padEditLabel, tempoLabel, hint;
     juce::Image backdrop;

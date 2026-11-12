@@ -17,6 +17,11 @@ int main (int argc, char** argv)
     for (int k = 0; k < (int) ((bar * 2 + bar * 9.4 / 16.0) / bs); ++k) { juce::MidiBuffer m; proc.processBlock (b, m); }
     std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
     ed->setVisible (true);
+    if (argc > 2 && juce::String (argv[2]) == "lab")
+    {
+        proc.applyKit (4);   // dub techno: shows rumble + duck
+        ed->keyPressed (juce::KeyPress ('k', {}, 'k'));
+    }
     juce::MessageManager::getInstance()->runDispatchLoopUntil (120);
     auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
     juce::File f (argc > 1 ? argv[1] : "/tmp/sb_ui.png"); f.deleteFile();

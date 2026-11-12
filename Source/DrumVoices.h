@@ -3,9 +3,10 @@
 #include <array>
 #include <cmath>
 
-// Eight synthesised drums, each with tune / decay / level, velocity-aware
-// (ghost notes come out quieter AND darker AND shorter, like a real player),
-// or a user WAV in place of the synth sound.
+// One drum synth engine for every pad. A Patch describes a sound as a handful of
+// layers (pitched body, sub, knock, 808-style metal, noise, FM, click); the library
+// and the Kick Lab are just different Patches. Velocity-aware: ghost notes come out
+// quieter, darker, shorter and with less pitch sweep, like a real player.
 
 enum Pad { Kick, Snare, Clap, Rim, Hat, OpenHat, Perc, Shaker, NumPads };
 
@@ -35,6 +36,30 @@ struct Svf   // TPT state-variable filter: lp / bp / hp
     }
 };
 
+
+struct Patch
+{
+    // pitched body: osc with a pitch sweep (start = sweep x freq, falling over 'drop')
+    int   wave = 0;           // 0 sine, 1 triangle, 2 round (saturated sine), 3 soft square
+    float freq = 200.0f, sweep = 1.0f, drop = 0.03f, curve = 0.0f;   // curve 0 = snappy exponential, 1 = long slide
+    float hold = 0.0f, decay = 0.1f, body = 0.0f;
+    float ratio2 = 0.0f, level2 = 0.0f;                               // second partial, same envelope
+    float sub = 0.0f, subDecay = 0.25f;                               // clean sine phase-locked to the body (no drive)
+    float knock = 0.0f, knockHz = 180.0f, knockDecay = 0.03f;         // short resonant ping
+    float metal = 0.0f, metalScale = 1.0f, metalBp = 9000.0f, metalHp = 6000.0f, metalDecay = 0.05f;   // TR-808 six-square cluster
+    float noise = 0.0f, noiseDecay = 0.1f, noiseHz = 2000.0f, noiseQ = 0.8f;
+    int   noiseMode = 1, bursts = 1;                                  // 0 lp, 1 bp, 2 hp; bursts > 1 = clap
+    float burstGap = 0.009f;
+    float fmRatio = 0.0f, fmIndex = 0.0f, fmDecay = 0.05f;            // phase modulation of the body
+    float click = 0.0f; int clickType = 0; float clickTone = 0.5f;    // 0 noise, 1 beater, 2 tick, 3 snap
+    float drive = 0.0f;
+    float gate = 0.0f;        // seconds; after it everything fades out (0 = off)
+    float gateFade = 0.008f;
+    float attack = 0.0f;      // seconds (shakers, brushes)
+    float velPitch = 0.3f;    // how much softer hits lose pitch sweep
+    float gain = 1.0f;
+};
+
 class DrumVoice
 {
 public:
@@ -42,7 +67,7 @@ public:
     int pad() const { return padId; }
     juce::int64 startedAt() const { return started; }
 
-    void trigger (int p, float vel, float tuneSemis, float decay, float level, const SampleData* sample,
+    void trigger (int p, float vel, const Patch& patch, float tuneSemis, float decay, float level, const SampleData* sample,
                   float sr, juce::int64 now, juce::uint32 seed, float echoSend = 0.0f, float spaceSend = 0.0f)
     {
         padId = p; on = true; started = now; fs = sr; t = 0;
@@ -51,61 +76,80 @@ public:
         bright = 0.55f + 0.45f * v;
         gain = level;
         tune = std::exp2 (tuneSemis / 12.0f);
-        dec = decay;
         smp = sample; smpPos = 0.0;
         rng = seed | 1u;
-        for (auto& ph : phases) ph = 0.0;
-        f1.reset(); f2.reset(); f3.reset(); lpState = 0; hpState = 0; hpIn = 0;
+        for (auto& ph : ph6) ph = 0.0;
+        ph0 = ph2 = phM = phK = 0.0;
+        fN.reset(); fM.reset(); fC.reset(); lpState = 0; hpM = 0; hpN = 0; clickLp = 0;
+        fade = 1.0f; fadeC = std::exp (-1.0f / ((smp != nullptr ? 0.008f : juce::jmax (0.002f, patch.gateFade)) * sr)); gateN = 1 << 30; holdN = 0; attN = 1;
+        subA = knA = meA = noA = 0.0f;
 
         static const float pans[NumPads] = { 0.0f, 0.02f, 0.12f, -0.28f, 0.22f, 0.26f, -0.32f, 0.36f };
         const float pn = pans[p];
         panL = std::sqrt (0.5f * (1.0f - pn)) * 1.414f;
         panR = std::sqrt (0.5f * (1.0f + pn)) * 1.414f;
 
-        const auto timeCoef = [this] (float seconds) { return std::exp (-1.0f / (juce::jmax (0.002f, seconds) * fs)); };
-        // ghosts are shorter: decay scales with velocity
-        const float vd = 0.6f + 0.4f * v;
-        switch (p)
+        const auto coef = [this] (float seconds) { return std::exp (-1.0f / (juce::jmax (0.0015f, seconds) * fs)); };
+        const float vd = 0.6f + 0.4f * v;                                // ghosts are shorter
+        const float dm = std::exp2 ((decay - 0.45f) * 3.2f) * vd;        // DECAY knob: 0.37x .. 3.4x
+        if (smp != nullptr)
         {
-            case Kick:    ampC = timeCoef ((0.05f + dec * 0.16f) * vd); pitchC = timeCoef (0.026f);
-                          gateAt = (int) ((0.09f + dec * 0.45f) * vd * fs); gateC = timeCoef (0.012f); break;   // tight: short body, then a fast gate so no boom lingers
-            case Snare:   ampC = timeCoef (0.06f * vd); noiseC = timeCoef ((0.05f + dec * 0.25f) * vd);
-                          f1.set (1900.0f * tune, 0.9f, fs); break;
-            case Clap:    noiseC = timeCoef ((0.05f + dec * 0.25f) * vd); f1.set (1150.0f * tune, 1.6f, fs); break;
-            case Rim:     ampC = timeCoef (0.022f + dec * 0.03f); f1.set (1750.0f * tune, 3.0f, fs); break;
-            case Hat:     ampC = timeCoef ((0.03f + dec * 0.09f) * vd); f1.set (9500.0f * std::sqrt (tune), 1.2f, fs); break;
-            case OpenHat: ampC = timeCoef ((0.12f + dec * 0.5f) * vd); f1.set (9000.0f * std::sqrt (tune), 1.1f, fs); break;
-            case Perc:    ampC = timeCoef ((0.06f + dec * 0.25f) * vd); pitchC = timeCoef (0.018f); break;
-            case Shaker:  ampC = timeCoef ((0.035f + dec * 0.12f) * vd); f1.set (6500.0f * std::sqrt (tune), 1.4f, fs); break;
-            default: break;
+            ampC = decay >= 0.99f ? 1.0f : coef (0.04f + decay * decay * 2.5f);
+            amp = 1.0f;
         }
-        // samples: decay = how much of the sample plays (1 = all of it)
-        if (smp != nullptr) ampC = dec >= 0.99f ? 1.0f : timeCoef (0.04f + dec * dec * 2.5f);
-        amp = 1.0f; noiseAmp = 1.0f; pitchEnv = 1.0f;
-        // darker ghosts: one-pole lowpass whose cutoff follows velocity
+        else
+        {
+            P = patch;
+            const float st = std::sqrt (tune);
+            P.freq *= tune; P.knockHz *= tune; P.noiseHz *= st; P.metalBp *= st; P.metalScale *= st;
+            P.sweep = 1.0f + (P.sweep - 1.0f) * (1.0f - P.velPitch * (1.0f - v));
+            holdN = (int) (P.hold * fs);
+            gateN = P.gate > 0.0f ? (int) (P.gate * dm / vd * fs) : (1 << 30);
+            attN = juce::jmax (1, (int) (P.attack * fs));
+            dropN = juce::jmax (1.0f, P.drop * fs);
+            ampC = coef (P.decay * dm);   amp = P.body > 0.0f || P.level2 > 0.0f ? 1.0f : 0.0f;
+            subC = coef (P.subDecay * dm); subA = P.sub > 0.0f ? 1.0f : 0.0f;
+            knC = coef (P.knockDecay);    knA = P.knock > 0.0f ? 1.0f : 0.0f;
+            meC = coef (P.metalDecay * dm); meA = P.metal > 0.0f ? 1.0f : 0.0f;
+            noC = coef (P.noiseDecay * dm); noA = P.noise > 0.0f ? 1.0f : 0.0f;
+            fmC = coef (P.fmDecay * dm);  fmA = 1.0f;
+            fN.set (P.noiseHz, P.noiseQ, fs);
+            fM.set (P.metalBp, 1.2f, fs);
+            fC.set (2400.0f + 4500.0f * P.clickTone, 1.4f, fs);
+            hpMc = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * P.metalHp / fs);
+            driveK = 1.0f + 8.0f * P.drive * P.drive;
+            driveN = 1.0f / std::tanh (driveK);
+        }
         ghostLp = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * (2500.0f + 16000.0f * v * v) / fs);
     }
 
-    void choke() { if (on) { ampC = juce::jmin (ampC, std::exp (-1.0f / (0.008f * fs))); noiseC = ampC; } }
+    void choke() { if (on) { fadeC = std::exp (-1.0f / (0.008f * fs)); gateN = juce::jmin (gateN, (int) t); ampC = juce::jmin (ampC, fadeC); } }
 
-    // dry into L/R, plus per-pad sends into the echo and space buses
-    void render (float* L, float* R, float* EL, float* ER, float* SL, float* SR, int start, int num)
+    // dry into L/R (or the kick bus), plus per-pad sends into the echo and space buses
+    void render (float* L, float* R, float* KL, float* KR, float* EL, float* ER, float* SL, float* SR, int start, int num)
     {
         if (! on) return;
+        float* dL = padId == Kick ? KL : L;
+        float* dR = padId == Kick ? KR : R;
         for (int i = start; i < start + num; ++i)
         {
             const float s = smp != nullptr ? nextSample() : nextSynth();
             lpState += (s - lpState) * ghostLp;
             const float o = lpState * gain * v;
             const float l = o * panL, r = o * panR;
-            L[i] += l; R[i] += r;
+            dL[i] += l; dR[i] += r;
             EL[i] += l * sendE; ER[i] += r * sendE;
             SL[i] += l * sendS; SR[i] += r * sendS;
-            if (amp < 0.0005f && noiseAmp < 0.0005f && t > 64) { on = false; break; }
+            if (t > 64 && (finished() || fade < 0.0003f)) { on = false; break; }
         }
     }
 
 private:
+    bool finished() const
+    {
+        if (smp != nullptr) return amp < 0.0005f;
+        return amp < 0.0005f && subA < 0.0005f && knA < 0.0005f && meA < 0.0005f && noA < 0.0005f && t > (juce::int64) holdN + attN;
+    }
     float noise() { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return (float) (int) rng * (1.0f / 2147483648.0f); }
 
     float nextSample()
@@ -113,122 +157,138 @@ private:
         const auto& b = smp->buffer;
         const int len = b.getNumSamples();
         const int i0 = (int) smpPos;
-        if (i0 >= len - 1) { amp = noiseAmp = 0.0f; ++t; return 0.0f; }
+        if (i0 >= len - 1) { amp = 0.0f; ++t; return 0.0f; }
         const float fr = (float) (smpPos - i0);
         float s = 0.0f;
         for (int c = 0; c < juce::jmin (2, b.getNumChannels()); ++c)
             s += b.getSample (c, i0) + (b.getSample (c, i0 + 1) - b.getSample (c, i0)) * fr;
         if (b.getNumChannels() > 1) s *= 0.5f;
         smpPos += smp->sampleRate / fs * tune;
-        const float a = amp; amp *= ampC; noiseAmp = amp; ++t;
-        return s * a;
+        const float a = amp; amp *= ampC; ++t;
+        if (t > gateN) fade *= fadeC;
+        return s * a * fade;
+    }
+
+    static float shape (int wave, double ph)
+    {
+        const float x = (float) std::sin (juce::MathConstants<double>::twoPi * ph);
+        switch (wave)
+        {
+            case 1: { const double f = ph - std::floor (ph); return (float) (f < 0.5 ? 4.0 * f - 1.0 : 3.0 - 4.0 * f); }
+            case 2: return std::tanh (2.2f * x) * 1.025f;
+            case 3: return std::tanh (6.0f * x);
+            default: return x;
+        }
     }
 
     float nextSynth()
     {
         const float twoPi = juce::MathConstants<float>::twoPi;
-        float out = 0.0f, lp, bp, hp;
-        const float ts = (float) t / fs;
-        switch (padId)
+        float lp, bp, hp, out = 0.0f;
+        const float tf = (float) t;
+
+        // ---- body (+ 2nd partial, FM, sub share its pitch)
+        float pitchMul = 1.0f;
+        if (P.sweep != 1.0f)
         {
-            case Kick:
-            {
-                const float f0 = 50.0f * tune;
-                const double f = f0 * (1.0 + 2.6 * pitchEnv);
-                phases[0] += f / fs; if (phases[0] >= 1.0) phases[0] -= 1.0;
-                pitchEnv *= pitchC;
-                const float body = std::tanh (1.7f * std::sin (twoPi * (float) phases[0])) * 0.85f;
-                const float click = t < (int) (0.004f * fs) ? noise() * 0.35f * bright * (1.0f - ts / 0.004f) : 0.0f;
-                out = body * amp + click;
-                amp *= t > gateAt ? ampC * gateC : ampC;
-                break;
-            }
-            case Snare:
-            {
-                phases[0] += 182.0 * tune / fs; if (phases[0] >= 1.0) phases[0] -= 1.0;
-                phases[1] += 331.0 * tune / fs; if (phases[1] >= 1.0) phases[1] -= 1.0;
-                const float tone = (std::sin (twoPi * (float) phases[0]) * 0.6f + std::sin (twoPi * (float) phases[1]) * 0.35f) * amp;
-                f1.run (noise(), lp, bp, hp);
-                const float n = (bp * 1.35f + hp * 0.2f * bright) * noiseAmp;
-                out = tone * 0.6f + n * 0.75f;
-                amp *= ampC; noiseAmp *= noiseC;
-                break;
-            }
-            case Clap:
-            {
-                // three quick bursts then a tail, like hands slightly out of sync
-                const float ms = ts * 1000.0f;
-                float e = 0.0f;
-                for (int b = 0; b < 3; ++b) { const float d = ms - (float) b * 9.0f; if (d >= 0.0f && d < 9.0f) e = juce::jmax (e, std::exp (-d / 2.8f)); }
-                if (ms >= 27.0f) { e = juce::jmax (e, noiseAmp); noiseAmp *= noiseC; }
-                f1.run (noise(), lp, bp, hp);
-                out = bp * 2.2f * e;
-                amp = e;
-                if (ms < 27.0f) noiseAmp = 1.0f;
-                break;
-            }
-            case Rim:
-            {
-                phases[0] += 480.0 * tune / fs; if (phases[0] >= 1.0) phases[0] -= 1.0;
-                phases[1] += 1690.0 * tune / fs; if (phases[1] >= 1.0) phases[1] -= 1.0;
-                f1.run (noise(), lp, bp, hp);
-                out = (std::sin (twoPi * (float) phases[0]) * 0.5f + std::sin (twoPi * (float) phases[1]) * 0.5f + bp * 0.6f) * amp;
-                amp *= ampC; noiseAmp = amp;
-                break;
-            }
-            case Hat:
-            case OpenHat:
-            {
-                // six detuned square waves (the classic metallic hat recipe) + noise, bandpassed high
-                static const double ratios[6] = { 205.3, 304.4, 369.6, 522.7, 540.0, 800.0 };
-                float m = 0.0f;
-                for (int o = 0; o < 6; ++o)
-                {
-                    phases[(size_t) o] += ratios[o] * 1.71 * tune / fs; if (phases[(size_t) o] >= 1.0) phases[(size_t) o] -= 1.0;
-                    m += phases[(size_t) o] < 0.5 ? 1.0f : -1.0f;
-                }
-                const float x = m * 0.12f + noise() * 0.5f;
-                f1.run (x, lp, bp, hp);
-                const float hpo = hp - (hpState += (hp - hpState) * 0.25f);   // extra high-pass
-                out = (bp * 0.8f + hpo * 0.6f * bright) * amp;
-                amp *= ampC; noiseAmp = amp;
-                break;
-            }
-            case Perc:
-            {
-                const double f = 262.0 * tune * (1.0 + 0.45 * pitchEnv);
-                phases[0] += f / fs; if (phases[0] >= 1.0) phases[0] -= 1.0;
-                pitchEnv *= pitchC;
-                const float s = std::sin (twoPi * (float) phases[0]);
-                out = (s + 0.25f * s * s * s) * amp * 0.9f;
-                amp *= ampC; noiseAmp = amp;
-                break;
-            }
-            case Shaker:
-            {
-                const float att = juce::jmin (1.0f, ts / 0.006f);
-                f1.run (noise(), lp, bp, hp);
-                out = (bp * 1.4f + hp * 0.3f) * amp * att;
-                amp *= ampC; noiseAmp = amp;
-                break;
-            }
-            default: break;
+            const float e = std::exp (-tf / dropN);
+            const float lin = juce::jmax (0.0f, 1.0f - tf / (dropN * 3.0f));
+            pitchMul = 1.0f + (P.sweep - 1.0f) * ((1.0f - P.curve) * e + P.curve * lin);
         }
+        const double f = (double) P.freq * pitchMul;
+        ph0 += f / fs; ph0 -= std::floor (ph0);
+        if (amp > 0.0f || subA > 0.0f)
+        {
+            double pm = 0.0;
+            if (P.fmIndex > 0.0f)
+            {
+                phM += f * P.fmRatio / fs; phM -= std::floor (phM);
+                pm = P.fmIndex * fmA * std::sin (juce::MathConstants<double>::twoPi * phM) / juce::MathConstants<double>::twoPi;
+                fmA *= fmC;
+            }
+            float b = 0.0f;
+            if (amp > 0.0005f)
+            {
+                b = shape (P.wave, ph0 + pm) * P.body;
+                if (P.level2 > 0.0f) { ph2 += f * P.ratio2 / fs; ph2 -= std::floor (ph2); b += shape (P.wave, ph2 + pm) * P.level2; }
+                if (P.drive > 0.0f) b = std::tanh (b * driveK) * driveN;   // drive before the envelope: grit without stretching the tail
+                b *= amp;
+                if (t >= holdN) amp *= ampC;
+            }
+            float sb = 0.0f;
+            if (subA > 0.0005f) { sb = std::sin (twoPi * (float) ph0) * subA * P.sub; if (t >= holdN) subA *= subC; }
+            out += b + sb;
+        }
+        // ---- knock: short ping that gives the kick its "thock"
+        if (knA > 0.0005f)
+        {
+            phK += P.knockHz / fs; phK -= std::floor (phK);
+            out += std::tanh (1.5f * std::sin (twoPi * (float) phK)) * knA * P.knock * 0.8f;
+            knA *= knC;
+        }
+        // ---- metal: six detuned squares (TR-808 ratios), band-passed and high-passed
+        if (meA > 0.0005f)
+        {
+            static const double r[6] = { 205.3, 304.4, 369.6, 522.7, 540.0, 800.0 };
+            float m = 0.0f;
+            for (int o = 0; o < 6; ++o) { ph6[(size_t) o] += r[o] * 1.71 * P.metalScale / fs; ph6[(size_t) o] -= std::floor (ph6[(size_t) o]); m += ph6[(size_t) o] < 0.5 ? 1.0f : -1.0f; }
+            fM.run (m * 0.16f, lp, bp, hp);
+            hpM += (bp - hpM) * hpMc;
+            out += (bp - hpM) * 3.0f * meA * P.metal * bright;
+            meA *= meC;
+        }
+        // ---- noise (with clap bursts)
+        if (noA > 0.0005f || (P.bursts > 1 && tf < P.burstGap * fs * (float) P.bursts))
+        {
+            float e = noA;
+            if (P.bursts > 1)
+            {
+                const float ms = tf / fs * 1000.0f, gap = P.burstGap * 1000.0f;
+                const float tailStart = gap * (float) P.bursts;
+                e = 0.0f;
+                for (int b = 0; b < P.bursts; ++b) { const float d = ms - (float) b * gap; if (d >= 0.0f && d < gap) e = juce::jmax (e, std::exp (-d / 2.8f)); }
+                if (ms >= tailStart) { e = juce::jmax (e, noA); noA *= noC; }
+            }
+            else noA *= noC;
+            fN.run (noise(), lp, bp, hp);
+            const float x = P.noiseMode == 0 ? lp : P.noiseMode == 1 ? bp * 1.6f : hp;
+            out += x * e * P.noise * (P.noiseMode == 2 ? bright : 1.0f);
+        }
+        // ---- click / transient
+        if (P.click > 0.0f && tf < 0.02f * fs)
+        {
+            const float ms = tf / fs * 1000.0f;
+            float c = 0.0f;
+            switch (P.clickType)
+            {
+                case 0: { const float n = noise(); clickLp += (n - clickLp) * (0.2f + 0.75f * P.clickTone); c = (P.clickTone > 0.5f ? n - clickLp * 0.6f : clickLp) * std::exp (-ms / 1.4f) * 0.9f; break; }
+                case 1: c = std::sin (twoPi * (1200.0f + 2600.0f * P.clickTone) * tf / fs) * std::exp (-ms / 1.8f); break;
+                case 2: c = (t == 0 ? 1.0f : t == 1 ? -0.6f : 0.0f) * (0.6f + 0.4f * P.clickTone) + noise() * std::exp (-ms / 0.35f) * 0.3f; break;
+                default: { fC.run (noise(), lp, bp, hp); c = bp * 2.4f * std::exp (-ms / 4.0f); break; }
+            }
+            out += c * P.click * bright;
+        }
+        // ---- attack + gate
+        if (t < attN) out *= tf / (float) attN;
+        if (t > gateN) { fade *= fadeC; out *= fade; }
         ++t;
-        return out;
+        return out * P.gain;
     }
 
     bool on = false;
     int padId = 0;
     juce::int64 started = 0;
-    float fs = 48000.0f, v = 1.0f, bright = 1.0f, gain = 1.0f, tune = 1.0f, dec = 0.5f;
-    int gateAt = 1 << 30; float gateC = 1.0f;
-    float amp = 1.0f, ampC = 0.999f, noiseAmp = 1.0f, noiseC = 0.999f, pitchEnv = 1.0f, pitchC = 0.99f;
+    Patch P;
+    float fs = 48000.0f, v = 1.0f, bright = 1.0f, gain = 1.0f, tune = 1.0f;
+    float amp = 0, ampC = 0.999f, subA = 0, subC = 0.999f, knA = 0, knC = 0.99f, meA = 0, meC = 0.99f, noA = 0, noC = 0.99f, fmA = 1, fmC = 0.999f;
+    float fade = 1.0f, fadeC = 0.998f, driveK = 1.0f, driveN = 1.0f, dropN = 1000.0f;
+    int holdN = 0, gateN = 1 << 30, attN = 1;
     float sendE = 0.0f, sendS = 0.0f;
-    float ghostLp = 1.0f, lpState = 0.0f, hpState = 0.0f, hpIn = 0.0f, panL = 1.0f, panR = 1.0f;
+    float ghostLp = 1.0f, lpState = 0.0f, hpM = 0.0f, hpMc = 0.5f, hpN = 0.0f, clickLp = 0.0f, panL = 1.0f, panR = 1.0f;
     juce::int64 t = 0;
-    std::array<double, 6> phases {};
-    Svf f1, f2, f3;
+    double ph0 = 0, ph2 = 0, phM = 0, phK = 0;
+    std::array<double, 6> ph6 {};
+    Svf fN, fM, fC;
     const SampleData* smp = nullptr;
     double smpPos = 0.0;
     juce::uint32 rng = 1;

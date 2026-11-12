@@ -38,9 +38,38 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShuffleBuddyProcessor::creat
     add (new APF ({ "fxfilter", 1 }, "Filter", NR (-1.0f, 1.0f), 0.0f,
                   fmt ([] (float x) { return std::abs (x) < 0.03f ? juce::String ("OFF") : (x < 0.0f ? "LOW " : "HIGH ") + juce::String (juce::roundToInt (std::abs (x) * 100)) + "%"; })));
     add (new APF ({ "squash", 1 }, "Squash", NR (0.0f, 1.0f), 0.25f, fmt (pct)));
+    // ---- KICK LAB (defaults = "Garage Thud")
+    {
+        auto skew = [] (float lo, float hi, float centre) { NR r (lo, hi); r.setSkewForCentre (centre); return r; };
+        auto ms = [] (float x) { return x < 1.0f ? juce::String (juce::roundToInt (x * 1000.0f)) + " ms" : juce::String (x, 2) + " s"; };
+        add (new juce::AudioParameterChoice ({ "kwave", 1 }, "Kick Wave", juce::StringArray { "Sine", "Triangle", "Round" }, 0));
+        add (new APF ({ "kfreq", 1 }, "Kick Pitch", skew (30.0f, 120.0f, 55.0f), 52.0f, fmt ([] (float x) { return juce::String (juce::roundToInt (x)) + " Hz"; })));
+        add (new juce::AudioParameterChoice ({ "kkey", 1 }, "Kick Key", juce::StringArray { "Free", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }, 0));
+        add (new APF ({ "kstart", 1 }, "Kick Sweep", skew (1.0f, 10.0f, 3.5f), 3.6f, fmt ([] (float x) { return "x" + juce::String (x, 1); })));
+        add (new APF ({ "kpdec", 1 }, "Kick Drop", skew (0.005f, 0.25f, 0.035f), 0.026f, fmt (ms)));
+        add (new APF ({ "kcurve", 1 }, "Kick Curve", NR (0.0f, 1.0f), 0.2f, fmt (pct)));
+        add (new APF ({ "khold", 1 }, "Kick Hold", skew (0.0f, 0.15f, 0.03f), 0.015f, fmt (ms)));
+        add (new APF ({ "kdecay", 1 }, "Kick Decay", skew (0.03f, 1.5f, 0.2f), 0.10f, fmt (ms)));
+        add (new APF ({ "kdrive", 1 }, "Kick Drive", NR (0.0f, 1.0f), 0.25f, fmt (pct)));
+        add (new APF ({ "kclick", 1 }, "Kick Click", NR (0.0f, 1.0f), 0.35f, fmt (pct)));
+        add (new juce::AudioParameterChoice ({ "kctype", 1 }, "Click Type", juce::StringArray { "Noise", "Beater", "Tick", "Snap" }, 1));
+        add (new APF ({ "kctone", 1 }, "Click Tone", NR (0.0f, 1.0f), 0.55f, fmt (pct)));
+        add (new APF ({ "ksub", 1 }, "Kick Sub", NR (0.0f, 1.0f), 0.35f, fmt (pct)));
+        add (new APF ({ "ksubdec", 1 }, "Sub Decay", skew (0.05f, 1.5f, 0.3f), 0.15f, fmt (ms)));
+        add (new APF ({ "kknock", 1 }, "Kick Knock", NR (0.0f, 1.0f), 0.15f, fmt (pct)));
+        add (new APF ({ "kknockf", 1 }, "Knock Pitch", skew (80.0f, 500.0f, 200.0f), 190.0f, fmt ([] (float x) { return juce::String (juce::roundToInt (x)) + " Hz"; })));
+        add (new juce::AudioParameterChoice ({ "klen", 1 }, "Kick Length", juce::StringArray { "Free", "1/16", "1/8", "1/4", "1/2", "Bar" }, 0));
+        add (new APF ({ "kduck", 1 }, "Kick Duck", NR (0.0f, 1.0f), 0.15f, fmt (pct)));
+        add (new APF ({ "krumble", 1 }, "Kick Rumble", NR (0.0f, 1.0f), 0.0f, fmt (pct)));
+    }
+    juce::StringArray soundNames;
+    for (auto& snd : sounds::library()) soundNames.add (snd.name);
+    static const char* padDefault[NumPads] = { "", "Garage Snare", "808 Clap", "808 Rim", "808 Hat", "Garage Open Hat", "Perc Thud", "Shaker" };
     for (int i = 0; i < NumPads; ++i)
     {
         const juce::String n = juce::String (padName (i)).toLowerCase();
+        if (i > 0) add (new juce::AudioParameterChoice ({ pid ("snd", i), 1 }, n + " sound", soundNames, sounds::find (padDefault[i])));
+        add (new juce::AudioParameterBool ({ pid ("layer", i), 1 }, n + " layer WAV + synth", false));
         add (new APF ({ pid ("lvl", i), 1 }, n + " level", NR (0.0f, 1.0f), 0.8f, fmt (pct)));
         add (new APF ({ pid ("tune", i), 1 }, n + " tune", NR (-12.0f, 12.0f, 0.1f), 0.0f, fmt ([] (float x) { return (x > 0 ? "+" : "") + juce::String (x, 1); })));
         add (new APF ({ pid ("decay", i), 1 }, n + " decay", NR (0.0f, 1.0f), 0.45f, fmt (pct)));
@@ -72,6 +101,8 @@ ShuffleBuddyProcessor::ShuffleBuddyProcessor()
         padPush[(size_t) i]  = apvts.getRawParameterValue (pid ("push", i));
         padEcho[(size_t) i]  = apvts.getRawParameterValue (pid ("esend", i));
         padSpace[(size_t) i] = apvts.getRawParameterValue (pid ("ssend", i));
+        padLayer[(size_t) i] = apvts.getRawParameterValue (pid ("layer", i));
+        padSnd[(size_t) i]   = i > 0 ? apvts.getRawParameterValue (pid ("snd", i)) : nullptr;
     }
     for (auto& c : ccMap) c.store (-1);
     // starter patterns: one per style, so it grooves the moment you press play
@@ -116,6 +147,90 @@ groove::Grid ShuffleBuddyProcessor::grid (int slot) const
 void ShuffleBuddyProcessor::setGrid (int slot, const groove::Grid& g)
 {
     for (int pd = 0; pd < NumPads; ++pd) for (int s = 0; s < groove::numSteps; ++s) setCell (slot, pd, s, g[(size_t) pd][(size_t) s]);
+}
+
+Patch ShuffleBuddyProcessor::kickPatch (double bpm) const
+{
+    Patch k;
+    k.wave = (int) p ("kwave");
+    const int key = (int) p ("kkey");
+    k.freq = key == 0 ? p ("kfreq") : 32.703f * std::exp2 ((float) (key - 1) / 12.0f);   // KEY LOCK: C1..B1
+    if (key != 0 && k.freq < 38.0f) k.freq *= 2.0f;                                      // keep it audible above ~38 Hz
+    k.sweep = p ("kstart"); k.drop = p ("kpdec"); k.curve = p ("kcurve");
+    k.hold = p ("khold"); k.decay = p ("kdecay"); k.body = 1.0f;
+    k.drive = p ("kdrive");
+    k.click = p ("kclick"); k.clickType = (int) p ("kctype"); k.clickTone = p ("kctone");
+    k.sub = p ("ksub"); k.subDecay = p ("ksubdec");
+    k.knock = p ("kknock"); k.knockHz = p ("kknockf"); k.knockDecay = 0.035f;
+    static const float steps[] = { 0.0f, 1.0f, 2.0f, 4.0f, 8.0f, 16.0f };
+    const int len = juce::jlimit (0, 5, (int) p ("klen"));
+    // LENGTH locked to the grid; on Free the tail is still trimmed where it stops being useful (~-22 dB)
+    k.gate = len == 0 ? juce::jmax (k.hold + 2.5f * k.decay, k.sub > 0.0f ? 2.5f * k.subDecay : 0.0f) + 0.01f
+                      : (float) (60.0 / bpm / 4.0) * steps[len] * 0.92f;
+    k.gateFade = 0.03f;
+    k.velPitch = 0.5f;
+    k.gain = 0.9f / (1.0f + 0.35f * k.sub);
+    return k;
+}
+
+void ShuffleBuddyProcessor::setParamValue (const juce::String& id, float value)
+{
+    if (auto* prm = apvts.getParameter (id)) { prm->beginChangeGesture(); prm->setValueNotifyingHost (prm->convertTo0to1 (value)); prm->endChangeGesture(); }
+}
+
+void ShuffleBuddyProcessor::applyKickPreset (int index)
+{
+    const auto& all = sounds::kickPresets();
+    if (index < 0 || index >= (int) all.size()) return;
+    const auto& k = all[(size_t) index];
+    setParamValue ("kwave", (float) k.wave);   setParamValue ("kfreq", k.freq);   setParamValue ("kkey", 0.0f);
+    setParamValue ("kstart", k.start);         setParamValue ("kpdec", k.drop);   setParamValue ("kcurve", k.curve);
+    setParamValue ("khold", k.hold);           setParamValue ("kdecay", k.decay); setParamValue ("kdrive", k.drive);
+    setParamValue ("kclick", k.click);         setParamValue ("kctype", (float) k.clickType); setParamValue ("kctone", k.clickTone);
+    setParamValue ("ksub", k.sub);             setParamValue ("ksubdec", k.subDecay);
+    setParamValue ("kknock", k.knock);         setParamValue ("kknockf", k.knockHz);
+    setParamValue ("klen", (float) k.length);  setParamValue ("kduck", k.duck);   setParamValue ("krumble", k.rumble);
+    setParamValue ("tune1", 0.0f);             setParamValue ("decay1", 0.45f);
+    kickName = k.name;
+}
+
+void ShuffleBuddyProcessor::applyKit (int index)
+{
+    const auto& all = sounds::kits();
+    if (index < 0 || index >= (int) all.size()) return;
+    const auto& kit = all[(size_t) index];
+    const auto& kp = sounds::kickPresets();
+    for (size_t i = 0; i < kp.size(); ++i) if (juce::String (kp[i].name) == kit.kick) applyKickPreset ((int) i);
+    for (int pd = 1; pd < NumPads; ++pd)
+    {
+        setParamValue (pid ("snd", pd), (float) sounds::find (kit.pads[pd - 1]));
+        setParamValue (pid ("tune", pd), 0.0f);
+        setParamValue (pid ("decay", pd), 0.45f);
+    }
+    kitName = kit.name;
+}
+
+void ShuffleBuddyProcessor::surpriseKick()
+{
+    // musical dice: every roll is a usable kick, never a mess
+    juce::Random& r = uiRng;
+    auto rr = [&r] (float lo, float hi) { return lo + (hi - lo) * r.nextFloat(); };
+    setParamValue ("kwave", (float) r.nextInt (3));
+    setParamValue ("kfreq", rr (42.0f, 66.0f));
+    setParamValue ("kstart", rr (2.0f, 6.5f));
+    setParamValue ("kpdec", rr (0.012f, 0.06f));
+    setParamValue ("kcurve", r.nextFloat() < 0.8f ? rr (0.0f, 0.35f) : rr (0.6f, 1.0f));
+    setParamValue ("khold", rr (0.0f, 0.04f));
+    setParamValue ("kdecay", rr (0.07f, 0.3f));
+    setParamValue ("kdrive", rr (0.0f, 0.8f));
+    setParamValue ("kclick", rr (0.1f, 0.7f));
+    setParamValue ("kctype", (float) r.nextInt (4));
+    setParamValue ("kctone", rr (0.2f, 0.9f));
+    setParamValue ("ksub", rr (0.0f, 0.7f));
+    setParamValue ("ksubdec", rr (0.1f, 0.5f));
+    setParamValue ("kknock", r.nextFloat() < 0.5f ? 0.0f : rr (0.1f, 0.7f));
+    setParamValue ("kknockf", rr (140.0f, 280.0f));
+    kickName = "Surprise #" + juce::String (r.nextInt (900) + 100);
 }
 
 void ShuffleBuddyProcessor::pushUndo (int slot)
@@ -222,7 +337,12 @@ void ShuffleBuddyProcessor::prepareToPlay (double sampleRate, int)
 {
     queued = 0; lastScheduled = -1; preparedBar = -1; stepPos = 0.0; wasPlaying = false;
     for (auto& vc : voices) vc = DrumVoice();
-    eBuf.setSize (2, maxChunk); sBuf.setSize (2, maxChunk);
+    eBuf.setSize (2, maxChunk); sBuf.setSize (2, maxChunk); kBuf.setSize (2, maxChunk); rBuf.setSize (2, maxChunk); rumbleTail = 0;
+    rumbleVerb.prepare (sampleRate);
+    rumbleVerb.setParameters (0.92f, 0.75f);
+    rumbleLp1.reset(); rumbleLp2.reset();
+    rumbleLp1.set (140.0f, 0.75f, (float) sampleRate); rumbleLp2.set (140.0f, 0.75f, (float) sampleRate);
+    duckEnv = 0.0f; duckHold = 0;
     echo.prepare (sampleRate);
     space.prepare (sampleRate);
     fxFilter.prepare (sampleRate);
@@ -247,8 +367,24 @@ void ShuffleBuddyProcessor::trigger (int pad, float vel)
     if (samePad >= 3 && oldestSame != nullptr) pick = oldestSame;
     if (pick == nullptr) pick = oldest;
     const auto i = (size_t) pad;
-    pick->trigger (pad, vel, padTune[i]->load(), padDecay[i]->load(), padLevel[i]->load(), liveSample[i].load(),
+    if (pad == Kick)   // one kick at a time: the new hit cuts the old tail, like a real machine
+    {
+        for (auto& vc : voices) if (vc.active() && vc.pad() == Kick) vc.choke();
+        duckEnv = 1.0f; duckHold = (int) (0.03 * getSampleRate());
+    }
+    if (pad == Kick) kickNow = kickPatch (bpmNow);
+    const Patch& patch = pad == Kick ? kickNow : sounds::library()[(size_t) juce::jlimit (0, (int) sounds::library().size() - 1, (int) padSnd[i]->load())].p;
+    auto* smpl = liveSample[i].load();
+    pick->trigger (pad, vel, patch, padTune[i]->load(), padDecay[i]->load(), padLevel[i]->load(), smpl,
                    (float) getSampleRate(), sampleClock, (juce::uint32) rng.nextInt(), padEcho[i]->load(), padSpace[i]->load());
+    if (smpl != nullptr && padLayer[i]->load() > 0.5f)   // LAYER: the synth plays underneath the WAV
+    {
+        DrumVoice* second = nullptr;
+        for (auto& vc : voices) if (! vc.active() && &vc != pick) { second = &vc; break; }
+        if (second != nullptr)
+            second->trigger (pad, vel, patch, padTune[i]->load(), padDecay[i]->load(), padLevel[i]->load(), nullptr,
+                             (float) getSampleRate(), sampleClock, (juce::uint32) rng.nextInt(), padEcho[i]->load(), padSpace[i]->load());
+    }
     hitVel[i].store (vel);
     hitCount[i].fetch_add (1);
 }
@@ -405,7 +541,8 @@ void ShuffleBuddyProcessor::runChunk (float* L, float* R, int n)
     }
 
     // ---- voices: dry + echo send + space send, each hit starting on its exact sample
-    eBuf.clear(); sBuf.clear();
+    eBuf.clear(); sBuf.clear(); kBuf.clear();
+    auto* KL = kBuf.getWritePointer (0); auto* KR = kBuf.getWritePointer (1);
     auto* EL = eBuf.getWritePointer (0); auto* ER = eBuf.getWritePointer (1);
     auto* SL = sBuf.getWritePointer (0); auto* SR = sBuf.getWritePointer (1);
     int done = 0;
@@ -416,7 +553,7 @@ void ShuffleBuddyProcessor::runChunk (float* L, float* R, int n)
         const int upto = (int) std::clamp<juce::int64> (nextT - sampleClock, (juce::int64) done, (juce::int64) n);
         if (upto > done)
         {
-            for (auto& vc : voices) vc.render (L, R, EL, ER, SL, SR, done, upto - done);
+            for (auto& vc : voices) vc.render (L, R, KL, KR, EL, ER, SL, SR, done, upto - done);
             done = upto;
         }
         if (done >= n) break;
@@ -463,7 +600,28 @@ void ShuffleBuddyProcessor::runChunk (float* L, float* R, int n)
     space.setParameters (0.3f + 0.6f * spaceAmt, 0.55f);
     space.process (SL, SR, n, spaceAmt * 1.1f, 0.0f);
 
-    for (int i = 0; i < n; ++i) { L[i] += EL[i] + SL[i]; R[i] += ER[i] + SR[i]; }
+    // ---- kick bus: RUMBLE (dark reverb tail, low-passed, pumped by the kick) and DUCK (the rest of the kit breathes around the kick)
+    const float duck = p ("kduck"), rumble = p ("krumble");
+    auto* RL = rBuf.getWritePointer (0); auto* RR = rBuf.getWritePointer (1);
+    if (rumble > 0.001f || rumbleTail > 0)
+    {
+        for (int i = 0; i < n; ++i) { RL[i] = RR[i] = (KL[i] + KR[i]) * 0.5f * rumble; }
+        rumbleVerb.process (RL, RR, n, 1.0f, 0.0f);
+        float lp, bp, hp, lp2;
+        for (int i = 0; i < n; ++i) { rumbleLp1.run (RL[i], lp, bp, hp); rumbleLp2.run (lp, lp2, bp, hp); RL[i] = std::tanh (lp2 * 2.5f) * 0.5f; }
+        rumbleTail = rumble > 0.001f ? (int) (6.0 * sr) : juce::jmax (0, rumbleTail - n);
+    }
+    else std::fill (RL, RL + n, 0.0f);
+    const float holdRel = std::exp (-1.0f / (0.16f * (float) sr));
+    const float rDuck = juce::jmax (0.85f, duck);
+    for (int i = 0; i < n; ++i)
+    {
+        if (duckHold > 0) --duckHold; else duckEnv *= holdRel;
+        const float rmb = RL[i] * (1.0f - rDuck * duckEnv);
+        const float g = 1.0f - duck * 0.8f * duckEnv;
+        L[i] = (L[i] + EL[i] + SL[i]) * g + KL[i] + rmb;
+        R[i] = (R[i] + ER[i] + SR[i]) * g + KR[i] + rmb;
+    }
     fxFilter.process (L, R, n, p ("fxfilter"), 0.45f);
 
     // ---- SQUASH: glue compressor + 4x oversampled saturation
@@ -551,6 +709,8 @@ void ShuffleBuddyProcessor::getStateInformation (juce::MemoryBlock& dest)
         if (idx >= 0 && idx < getParameters().size())
             if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (getParameters()[idx])) map->setAttribute ("cc" + juce::String (cc), rp->getParameterID());
     }
+    auto* names = xml->createNewChildElement ("NAMES");
+    names->setAttribute ("kick", kickName); names->setAttribute ("kit", kitName);
     auto* smp = xml->createNewChildElement ("SAMPLES");
     for (int pd = 0; pd < NumPads; ++pd) if (samplePath (pd).isNotEmpty()) smp->setAttribute ("p" + juce::String (pd), samplePath (pd));
     copyXmlToBinary (*xml, dest);
@@ -581,6 +741,12 @@ void ShuffleBuddyProcessor::setStateInformation (const void* data, int size)
             }
         xml->removeChildElement (map, true);
         ++mapVersion;
+    }
+    if (auto* names = xml->getChildByName ("NAMES"))
+    {
+        kickName = names->getStringAttribute ("kick", kickName);
+        kitName = names->getStringAttribute ("kit", kitName);
+        xml->removeChildElement (names, true);
     }
     if (auto* smp = xml->getChildByName ("SAMPLES"))
     {
