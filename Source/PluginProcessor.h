@@ -52,6 +52,8 @@ public:
     void applyStyleFeel (int style);
     int currentSlot() const { return (int) apvts.getRawParameterValue ("slot")->load(); }
     int playingSlot() const { return playSlotNow.load(); }
+    // what the grid shows: the playing pattern while CHAIN runs, else the selected one
+    int viewSlot() const { return (apvts.getRawParameterValue ("chain")->load() > 0.5f && apvts.getRawParameterValue ("play")->load() > 0.5f) ? playingSlot() : currentSlot(); }
 
     // ---- sounds
     Patch kickPatch (double bpm) const;

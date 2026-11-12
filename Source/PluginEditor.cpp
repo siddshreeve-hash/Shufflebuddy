@@ -278,7 +278,7 @@ void StepGrid::paint (juce::Graphics& g)
     g.setColour (toy::cream);
     g.fillRoundedRectangle (r.withTrimmedBottom (7.0f), 28.0f);
 
-    const int slot = proc.currentSlot();
+    const int slot = proc.viewSlot();
     const bool playing = proc.apvts.getRawParameterValue ("play")->load() > 0.5f;
     const int cur = playing ? proc.playStep() : -1;
     const float swing = (proc.apvts.getRawParameterValue ("swing")->load() - 50.0f) / 25.0f;   // 0..1
@@ -385,7 +385,7 @@ void StepGrid::mouseDown (const juce::MouseEvent& e)
         if (onSelectPad) onSelectPad (h.pad);
         return;
     }
-    const int slot = proc.currentSlot();
+    const int slot = proc.viewSlot();
     const int v = proc.cell (slot, h.pad, h.step);
     proc.pushUndo (slot);
     int nv;
@@ -414,7 +414,7 @@ void StepGrid::mouseDrag (const juce::MouseEvent& e)
     const auto h = hitTest (e.getPosition());
     if (h.pad < 0 || h.step < 0 || painted[(size_t) h.pad][(size_t) h.step]) return;
     painted[(size_t) h.pad][(size_t) h.step] = true;
-    proc.setCell (proc.currentSlot(), h.pad, h.step, (juce::uint8) paintValue);
+    proc.setCell (proc.viewSlot(), h.pad, h.step, (juce::uint8) paintValue);
     repaint();
 }
 
