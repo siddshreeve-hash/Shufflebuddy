@@ -34,7 +34,7 @@ target_link_libraries(ShuffleBuddy
 
 option(SB_BUILD_TESTS "Build offline test tools" OFF)
 if(SB_BUILD_TESTS)
-    foreach(t Render UiSnapshot Perf)
+    foreach(t Render UiSnapshot Perf SongRender)
         juce_add_console_app(${t} PRODUCT_NAME "${t}")
         target_sources(${t} PRIVATE tests/${t}.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp)
         target_compile_definitions(${t} PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
