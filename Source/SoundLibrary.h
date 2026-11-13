@@ -126,6 +126,15 @@ namespace sounds
             v.push_back (mk ("Real Bongo", "Real Kit (recorded)", [] (Patch& p) { p.real = real ("bongo"); p.realMix = 1.0f; p.realRoom = 0.6f; p.gain = 1.0f; }));
             v.push_back (mk ("Real Cowbell", "Real Kit (recorded)", [] (Patch& p) { p.real = real ("cowbell"); p.realMix = 1.0f; p.realRoom = 0.5f; p.gain = 1.0f; }));
             v.push_back (mk ("Real Guiro", "Real Kit (recorded)", [] (Patch& p) { p.real = real ("guiro"); p.realMix = 1.0f; p.realRoom = 0.6f; p.gain = 1.6f; }));
+            // tighten: shorter snare/clap tails, and every room (real room mics + synth room) at half size
+            for (auto& snd : v)
+            {
+                const juce::String cat (snd.cat);
+                if (cat == "Snares" || cat == "Claps") { snd.p.noiseDecay *= 0.5f; snd.p.decay *= 0.7f; snd.p.gate = 0.2f; snd.p.gateFade = 0.035f; }
+                snd.p.realRoom *= 0.45f;
+                snd.p.room *= 0.5f;
+                snd.p.roomSize = juce::jmin (snd.p.roomSize, 1.0f);
+            }
             return v;
         }();
         return lib;

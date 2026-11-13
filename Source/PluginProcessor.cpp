@@ -35,8 +35,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShuffleBuddyProcessor::creat
     add (new juce::AudioParameterBool ({ "fill", 1 }, "Fill", false));
     add (new juce::AudioParameterBool ({ "throw", 1 }, "Throw", false));
     add (new juce::AudioParameterChoice ({ "chain", 1 }, "Chain", juce::StringArray { "Off", "A-B", "A-B-C-D", "A-A-A-B" }, 0));
-    add (new APF ({ "echo", 1 }, "Echo", NR (0.0f, 1.0f), 0.35f, fmt (pct)));
-    add (new APF ({ "space", 1 }, "Space", NR (0.0f, 1.0f), 0.25f, fmt (pct)));
+    add (new APF ({ "echo", 1 }, "Echo", NR (0.0f, 1.0f), 0.15f, fmt (pct)));
+    add (new APF ({ "space", 1 }, "Space", NR (0.0f, 1.0f), 0.12f, fmt (pct)));
     add (new juce::AudioParameterChoice ({ "echotime", 1 }, "Echo Time", juce::StringArray { "1/16", "1/8", "1/8 dot", "1/4" }, 2));
     add (new juce::AudioParameterChoice ({ "echotype", 1 }, "Echo Type", juce::StringArray { "Tape", "Space Echo", "BBD" }, 0));
     add (new APF ({ "fxfilter", 1 }, "Filter", NR (-1.0f, 1.0f), 0.0f,
@@ -96,8 +96,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShuffleBuddyProcessor::creat
         add (new APF ({ pid ("decay", i), 1 }, n + " decay", NR (0.0f, 1.0f), 0.45f, fmt (pct)));
         add (new APF ({ pid ("push", i), 1 }, n + " push", NR (-20.0f, 30.0f, 0.5f), 0.0f,
                       fmt ([] (float x) { return (x > 0 ? "+" : "") + juce::String (juce::roundToInt (x)) + "ms"; })));
-        static const float eDef[NumPads] = { 0.0f, 0.12f, 0.12f, 0.4f, 0.05f, 0.1f, 0.35f, 0.0f, 0.15f, 0.0f };
-        static const float sDef[NumPads] = { 0.0f, 0.1f, 0.18f, 0.2f, 0.08f, 0.15f, 0.2f, 0.08f, 0.2f, 0.25f };
+        static const float eDef[NumPads] = { 0.0f, 0.0f, 0.0f, 0.3f, 0.0f, 0.05f, 0.25f, 0.0f, 0.1f, 0.0f };
+        static const float sDef[NumPads] = { 0.0f, 0.05f, 0.06f, 0.12f, 0.04f, 0.08f, 0.12f, 0.04f, 0.1f, 0.15f };
         add (new APF ({ pid ("esend", i), 1 }, n + " echo send", NR (0.0f, 1.0f), eDef[i], fmt (pct)));
         add (new APF ({ pid ("ssend", i), 1 }, n + " space send", NR (0.0f, 1.0f), sDef[i], fmt (pct)));
     }
