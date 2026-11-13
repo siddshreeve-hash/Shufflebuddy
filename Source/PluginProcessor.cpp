@@ -75,6 +75,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShuffleBuddyProcessor::creat
     add (new juce::AudioParameterChoice ({ "autofill", 1 }, "Auto Fill", juce::StringArray { "Off", "Every 4", "Every 8", "Every 16" }, 0));
     add (new juce::AudioParameterBool ({ "fillcrash", 1 }, "Crash After Fill", true));
     add (new juce::AudioParameterBool ({ "midiout", 1 }, "MIDI Out", true));
+    add (new APF ({ "feel", 1 }, "Feel", NR (0.0f, 1.0f), 0.5f, fmt (pct)));
+    add (new APF ({ "drift", 1 }, "Drift", NR (0.0f, 1.0f), 0.3f, fmt (pct)));
+    add (new juce::AudioParameterChoice ({ "notemap", 1 }, "Note Map", juce::StringArray { "Live Kits", "Push Pads", "Custom" }, 0));
     juce::StringArray soundNames;
     for (auto& snd : sounds::library()) soundNames.add (snd.name);
     static const char* padDefault[NumPads] = { "", "Garage Snare", "808 Clap", "808 Rim", "808 Hat", "Garage Open Hat", "Perc Thud", "Shaker", "Studio Tom", "Crash" };
@@ -469,7 +472,11 @@ void ShuffleBuddyProcessor::trigger (int pad, float vel, int alt)
 
 int ShuffleBuddyProcessor::noteFor (int lane, int alt) const
 {
-    if (lane == Toms) { static const int tn[4] = { 41, 45, 48, 50 }; return tn[juce::jlimit (0, 3, alt)] + ((int) padNote[(size_t) Toms]->load() - 45); }
+    if (lane == Toms)
+    {
+        if ((int) p ("notemap") == 1) return juce::jlimit (0, 127, (int) padNote[(size_t) Toms]->load() + juce::jlimit (0, 3, alt));   // Push: floor..high on 4 pads in a row
+        static const int tn[4] = { 41, 45, 48, 50 }; return juce::jlimit (0, 127, tn[juce::jlimit (0, 3, alt)] + ((int) padNote[(size_t) Toms]->load() - 45));
+    }
     return juce::jlimit (0, 127, (int) padNote[(size_t) lane]->load());
 }
 
@@ -490,6 +497,7 @@ groove::EngineIn ShuffleBuddyProcessor::engineIn() const
         in.push[(size_t) i] = padPush[(size_t) i]->load();
         in.audible[(size_t) i] = anySolo ? padSolo[(size_t) i]->load() > 0.5f : padMute[(size_t) i]->load() < 0.5f;
     }
+    in.feel = p ("feel"); in.drift = p ("drift");
     in.seed = engineSeed;
     return in;
 }
@@ -550,27 +558,108 @@ juce::MidiMessageSequence ShuffleBuddyProcessor::printBars (int bars)
 {
     // render N bars offline with the same engine (new dice each print): ghosts, variety, chance, fills, swing all baked in
     juce::MidiMessageSequence seq;
+    PrintSpec sp; sp.bars = bars;
+    bool prev = false;
+    printInto (seq, sp, (juce::uint32) uiRng.nextInt(), 0, prev);
+    seq.sort(); seq.updateMatchedPairs();
+    return seq;
+}
+
+void ShuffleBuddyProcessor::printInto (juce::MidiMessageSequence& seq, const PrintSpec& sp, juce::uint32 seed, int barOffset, bool& prevFilled)
+{
     auto in = engineIn();
-    in.seed = (juce::uint32) uiRng.nextInt();
+    in.seed = seed;
+    if (sp.chain >= 0) in.chain = sp.chain;
+    if (sp.slot >= 0) in.slot = sp.slot;
+    if (sp.autoFill >= 0) in.autoFill = sp.autoFill;
+    if (sp.fillType >= 0) in.fillType = sp.fillType;
+    if (sp.fillLen > 0) in.fillLen = sp.fillLen;
+    in.variety = juce::jlimit (0.0f, 1.0f, in.variety * sp.varMul);
+    in.ghosts = juce::jlimit (0.0f, 1.0f, in.ghosts * sp.ghostMul);
+    for (int i = 0; i < NumPads; ++i) in.audible[(size_t) i] = in.audible[(size_t) i] && ((sp.laneMask >> i) & 1u) != 0;
     auto plan = std::make_unique<groove::BarPlan>();
-    const double bpm = p ("tempo"), ticksPer16 = 240.0, ticksPerMs = 960.0 * bpm / 60000.0;
-    bool prevFilled = false;
-    for (int b = 0; b < bars; ++b)
+    const double bpm = tempoNow(), ticksPer16 = 240.0, ticksPerMs = 960.0 * bpm / 60000.0;
+    for (int b = 0; b < sp.bars; ++b)
     {
-        planBar (*plan, b, false, prevFilled, in);
+        in.energy = sp.bars > 1 ? sp.e0 + (sp.e1 - sp.e0) * (float) b / (float) (sp.bars - 1) : sp.e0;
+        const bool fillNow = sp.fillLast && b == sp.bars - 1;
+        const bool landed = prevFilled && in.crash;
+        planBar (*plan, b, fillNow, prevFilled, in);
         prevFilled = plan->filled;
+        const double barTicks = (double) (barOffset + b) * 16.0 * ticksPer16;
+        if (b == 0 && sp.crashStart && ! landed && in.audible[(size_t) Crash])
+        {
+            seq.addEvent (juce::MidiMessage::noteOn (1, noteFor (Crash, 1), 0.85f * in.energy), barTicks);
+            seq.addEvent (juce::MidiMessage::noteOff (1, noteFor (Crash, 1)), barTicks + 110.0);
+        }
         for (int h = 0; h < plan->nHits; ++h)
         {
             const auto& hit = plan->hits[(size_t) h];
-            const double t = juce::jmax (0.0, ((double) b * 16.0 + hit.pos) * ticksPer16 + hit.ms * ticksPerMs);
+            const double t = juce::jmax (0.0, barTicks + hit.pos * ticksPer16 + hit.ms * ticksPerMs);
             const int note = noteFor (hit.lane, hit.alt);
             seq.addEvent (juce::MidiMessage::noteOn (1, note, juce::jlimit (0.01f, 1.0f, hit.vel)), t);
             seq.addEvent (juce::MidiMessage::noteOff (1, note), t + 110.0);
         }
     }
-    seq.sort();
-    seq.updateMatchedPairs();
-    return seq;
+}
+
+juce::Array<juce::File> ShuffleBuddyProcessor::printPack (const juce::File& parent)
+{
+    const double bpm = tempoNow();
+    const juce::String genre = juce::String (groove::styleName ((int) p ("style"))).trim();
+    auto dir = parent.getChildFile (juce::File::createLegalFileName (genre + " " + juce::String (juce::roundToInt (bpm)) + "bpm "
+                                                                       + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H%M%S")));
+    dir.createDirectory();
+    juce::Array<juce::File> files;
+    juce::uint32 seed = (juce::uint32) uiRng.nextInt();
+    auto write = [&] (const juce::String& name, const juce::Array<PrintSpec>& parts)
+    {
+        juce::MidiMessageSequence seq; bool prev = false; int off = 0;
+        for (auto& sp : parts) { printInto (seq, sp, seed += 7777u, off, prev); off += sp.bars; }
+        seq.sort(); seq.updateMatchedPairs();
+        auto f = dir.getChildFile (name + ".mid");
+        if (writeMidiFile (seq, bpm, f)) files.add (f);
+    };
+    enum : juce::uint32 { K = 1u << Kick, S = 1u << Snare, C = 1u << Clap, R = 1u << Rim, H = 1u << Hat, O = 1u << OpenHat,
+                          P = 1u << Perc, Sh = 1u << Shaker, T = 1u << Toms, Cr = 1u << Crash, All = 0x3ffu };
+    // the genre's four bars, each as a 4-bar loop with the feel baked in (no fills: loop them)
+    const char* letters[4] = { "A", "B", "C", "D" };
+    for (int k = 0; k < 4; ++k) { PrintSpec sp; sp.bars = 4; sp.chain = 0; sp.slot = k; sp.autoFill = 0; write ("0" + juce::String (k + 1) + " Groove " + letters[k], { sp }); }
+    // phrases: A B C D chained, fill on the last bar
+    { PrintSpec sp; sp.bars = 8;  sp.chain = 2; sp.autoFill = 0; sp.fillLast = true; write ("05 Phrase 8 bars", { sp }); }
+    { PrintSpec sp; sp.bars = 16; sp.chain = 2; sp.autoFill = 8; sp.fillLast = true; write ("06 Phrase 16 bars", { sp }); }
+    // one-bar fills to drop at the end of any section
+    const char* fills[5] = { "Toms", "Snare Roll", "Kicks", "Hats", "Drop" };
+    for (int k = 0; k < 5; ++k) { PrintSpec sp; sp.bars = 1; sp.chain = 0; sp.slot = 3; sp.fillLast = true; sp.fillType = k + 1; write (juce::String (7 + k).paddedLeft ('0', 2) + " Fill " + fills[k], { sp }); }
+    // a full arrangement: intro, groove, break, build, drop, outro
+    {
+        juce::Array<PrintSpec> a;
+        PrintSpec intro;  intro.bars = 8;  intro.laneMask = K | H | O | P | Sh; intro.chain = 2; intro.autoFill = 0; intro.fillLast = true; intro.fillType = 4; intro.varMul = 0.6f; intro.e0 = 0.82f; intro.e1 = 0.95f; a.add (intro);
+        PrintSpec groove; groove.bars = 16; groove.chain = 2; groove.autoFill = 8; groove.crashStart = true; a.add (groove);
+        PrintSpec brk;    brk.bars = 8;    brk.laneMask = S | C | R | H | O | P | Sh | Cr; brk.chain = 2; brk.autoFill = 0; brk.fillLast = true; brk.fillType = 2; brk.ghostMul = 1.3f; brk.e0 = 0.85f; brk.e1 = 0.9f; a.add (brk);
+        PrintSpec build;  build.bars = 8;  build.laneMask = K | S | H | P | Sh | T | Cr; build.chain = 2; build.autoFill = 4; build.fillType = 2; build.fillLast = true; build.fillLen = 16; build.e0 = 0.9f; build.e1 = 1.05f; a.add (build);
+        PrintSpec drop;   drop.bars = 16;  drop.chain = 2; drop.autoFill = 8; drop.crashStart = true; drop.varMul = 1.3f; drop.e0 = 1.05f; drop.e1 = 1.05f; a.add (drop);
+        PrintSpec outro;  outro.bars = 8;  outro.laneMask = K | R | H | P | Sh | Cr; outro.chain = 2; outro.autoFill = 0; outro.crashStart = true; outro.e0 = 1.0f; outro.e1 = 0.6f; a.add (outro);
+        write ("12 Arrangement 64 bars", a);
+    }
+    return files;
+}
+
+juce::String ShuffleBuddyProcessor::noteName (int note)
+{
+    static const char* n[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    return juce::String (n[(note % 12 + 12) % 12]) + juce::String (note / 12 - 2);
+}
+
+void ShuffleBuddyProcessor::applyNoteMap (int map)
+{
+    // 0: Live's drum kits (GM layout: C1 kick, D1 snare, D#1 clap, C#1 rim, F#1 hat, A#1 open hat, toms spread, C#2 crash)
+    // 1: Push / any Drum Rack: the first pads in order from C1 (toms take 4 pads, floor..high)
+    static const int live[NumPads] = { 36, 38, 39, 37, 42, 46, 47, 44, 45, 49 };
+    static const int push[NumPads] = { 36, 37, 38, 39, 40, 41, 42, 43, 44, 48 };
+    if (map == 0 || map == 1)
+        for (int i = 0; i < NumPads; ++i) setParamValue (pid ("note", i), (float) (map == 0 ? live[i] : push[i]));
+    setParamValue ("notemap", (float) map);
 }
 
 bool ShuffleBuddyProcessor::writeMidiFile (const juce::MidiMessageSequence& notes, double bpm, const juce::File& f)

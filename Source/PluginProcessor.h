@@ -81,6 +81,21 @@ public:
     // ---- MIDI: what goes out to the DAW, RECORD (what actually played) and PRINT (render N bars offline)
     int noteFor (int lane, int alt) const;
     juce::MidiMessageSequence printBars (int bars);
+    // PRINT with rules: which lanes play, fill policy, energy over the clip. Used for packs and arrangements.
+    struct PrintSpec
+    {
+        int bars = 4;
+        juce::uint32 laneMask = 0x3ff;          // bit per lane
+        int autoFill = -1, fillType = -1, fillLen = -1, chain = -1, slot = -1;   // -1 = the current setting
+        bool fillLast = false, crashStart = false;
+        float varMul = 1.0f, ghostMul = 1.0f, e0 = 1.0f, e1 = 1.0f;
+    };
+    void printInto (juce::MidiMessageSequence&, const PrintSpec&, juce::uint32 seed, int barOffset, bool& prevFilled);
+    // PRINT PACK: a folder of ready-to-drag clips (4 grooves, 2 phrases, 5 fills, a 64-bar arrangement)
+    juce::Array<juce::File> printPack (const juce::File& parent);
+    juce::File packFolder() const { return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Shuffle Buddy").getChildFile ("Prints"); }
+    static juce::String noteName (int note);   // Live's naming: 36 = C1
+    void applyNoteMap (int map);               // 0 Live kits, 1 Push pads in order, 2 custom (leave as is)
     void startRecording()  { recSeq.clear(); recArmed.store (true); recStartBar.store (-1); recording = true; }
     void stopRecording();
     bool isRecording() const { return recording; }

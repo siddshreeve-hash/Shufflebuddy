@@ -110,6 +110,41 @@ private:
     bool dragging = false;
 };
 
+// drags a whole folder of printed clips into Live at once
+class PackDragChip : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    juce::Array<juce::File> files;
+    juce::String what;
+    void paint (juce::Graphics&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseEnter (const juce::MouseEvent&) override { setMouseCursor (files.isEmpty() ? juce::MouseCursor::NormalCursor : juce::MouseCursor::DraggingHandCursor); }
+private:
+    bool dragging = false;
+};
+
+// GROOVE LAB: the feel engine + how the notes land in Ableton + print packs
+class GrooveLab : public juce::Component
+{
+public:
+    GrooveLab (ShuffleBuddyProcessor&, LcdDisplay&);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void refresh();
+private:
+    struct Knob { std::unique_ptr<juce::Slider> s; std::unique_ptr<juce::Label> name; std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> att; };
+    void addKnob (const juce::String& id, const juce::String& label, juce::Colour c, const juce::String& tip);
+    void noteMenu (int lane);
+    ShuffleBuddyProcessor& proc;
+    LcdDisplay& lcd;
+    std::vector<Knob> knobs;
+    juce::TextButton mapBtns[3], laneBtns[NumPads], packBtn { "PRINT PACK" }, folderBtn { "OPEN FOLDER" };
+    PackDragChip chip;
+    juce::File lastPack;
+    int lastMap = -1;
+    std::array<int, NumPads> lastNotes {};
+};
+
 class FxMeter : public juce::Component, public juce::SettableTooltipClient
 {
 public:
@@ -193,6 +228,7 @@ private:
     void soundMenu();
     void kitsMenu();
     void showLab (bool);
+    void showGrooveLab (bool);
 
     ShuffleBuddyProcessor& proc;
     ToyLookAndFeel lnf;
@@ -217,6 +253,8 @@ private:
     FxMeter grMeter, echoLed;
     juce::TextButton soundBtn, labBtn { "KICK LAB" }, kitsBtn { "KITS" };
     std::unique_ptr<KickLab> lab;
+    std::unique_ptr<GrooveLab> grooveLab;
+    juce::TextButton deckTab { "DUB DECK" }, labTab { "GROOVE LAB + ABLETON" };
     int lastMapVersion = -1, lastLearn = -2;
     juce::Label padEditLabel, tempoLabel, hint;
     juce::Image backdrop;

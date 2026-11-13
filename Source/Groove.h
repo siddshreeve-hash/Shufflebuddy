@@ -234,6 +234,9 @@ namespace groove
         float swing = 0.0f;                                   // 0..0.5 of a 16th
         std::array<float, NumPads> laneSwing {}, push {};    // swing multiplier, push in ms
         float ghosts = 0.0f, loosen = 0.0f, variety = 0.0f;
+        float feel = 0.0f;     // accents (hats lead on the beat), phrases that build into fills, fills that crescendo, energy that wanders
+        float drift = 0.0f;    // each limb leans slowly ahead/behind over the bars (not random jitter: that's LOOSEN)
+        float energy = 1.0f;   // velocity scale (arrangement sections)
         int style = 0, chain = 0, slot = 0;
         std::array<bool, NumPads> audible {};
         int fillType = FillAuto, fillLen = 8, autoFill = 0;
@@ -250,6 +253,19 @@ namespace groove
         Grid played {};
         std::array<std::array<juce::uint8, numSteps>, NumPads> src {};
     };
+
+    // smooth noise: same seed + x gives the same value, neighbouring x drift slowly (a drummer's lean, not dice)
+    inline float smoothNoise (juce::uint32 seed, int lane, double x)
+    {
+        auto h = [&] (juce::int64 k)
+        {
+            juce::uint32 v = seed * 2654435761u ^ ((juce::uint32) lane * 40503u) ^ ((juce::uint32) k * 2246822519u);
+            v ^= v >> 15; v *= 2246822519u; v ^= v >> 13; v *= 3266489917u; v ^= v >> 16;
+            return (float) (v & 0xffffff) / 8388607.5f - 1.0f;
+        };
+        const double fl = std::floor (x); const auto i = (juce::int64) fl; const float f = (float) (x - fl), sm = f * f * (3.0f - 2.0f * f);
+        return h (i) + (h (i + 1) - h (i)) * sm;
+    }
 
     inline int slotForBar (const EngineIn& in, juce::int64 bar)
     {
@@ -316,11 +332,25 @@ namespace groove
                 if (! c.on()) continue;
                 float v = (float) c.vel / 127.0f;
                 if (c.vel < 64) v *= 0.55f + 0.9f * in.ghosts;   // GHOSTS also sets how loud ghost notes are
+                if (in.feel > 0.0f)
+                {
+                    // the hand on the hats leads on the beat and lightens on the offs
+                    static const float acc[4] = { 1.0f, 0.76f, 0.9f, 0.72f };
+                    if ((p == Hat || p == Shaker || p == Perc || p == OpenHat) && c.vel >= 64) v *= 1.0f - in.feel * (1.0f - acc[s & 3]);
+                    // energy wanders bar to bar, and each 4-bar phrase leans into its last bar
+                    v *= 1.0f + in.feel * (0.08f * smoothNoise (in.seed, 99, (double) bar * 0.5) + 0.06f * ((float) (bar & 3) / 3.0f) - 0.03f);
+                    // fills crescendo into the one
+                    if (out.src[(size_t) p][(size_t) s] == FromFill && p != Crash) v *= 1.0f - in.feel * 0.3f * (1.0f - (float) s / 15.0f);
+                }
+                v *= in.energy;
                 const float g1 = r.nextFloat() + r.nextFloat() - 1.0f, g2 = r.nextFloat() + r.nextFloat() - 1.0f;
                 v = juce::jlimit (0.05f, 1.0f, v * (1.0f + g1 * 0.35f * in.loosen));
                 float pos = (float) s + (float) c.nudge / 100.0f;
                 if (s & 1) pos += in.swing * in.laneSwing[(size_t) p];
-                const float ms = in.push[(size_t) p] + g2 * in.loosen * 14.0f;
+                float ms = in.push[(size_t) p] + g2 * in.loosen * 14.0f;
+                if (in.drift > 0.0f)   // each limb leans on its own, slowly; the kick stays the anchor
+                    ms += in.drift * ((p == Kick ? 2.5f : 8.0f) * smoothNoise (in.seed, p, (double) bar * 0.5 + (double) s / 32.0)
+                                      + 4.0f * smoothNoise (in.seed, 50, (double) bar * 0.25));
                 const int n = juce::jlimit (1, 4, (int) c.ratchet);
                 for (int k = 0; k < n && out.nHits < maxHits; ++k)
                     out.hits[(size_t) out.nHits++] = { pos + (float) k / (float) n, ms, p, juce::jlimit (0.05f, 1.0f, v * (k == 0 ? 1.0f : 0.78f + 0.08f * (float) k)), (int) c.alt };

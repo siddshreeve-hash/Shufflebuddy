@@ -1004,6 +1004,160 @@ void MidiDragChip::mouseDrag (const juce::MouseEvent& e)
     juce::DragAndDropContainer::performExternalDragDropOfFiles ({ f.getFullPathName() }, false, this, [this] { dragging = false; repaint(); });
 }
 
+// ================================================================ print pack drag + GROOVE LAB
+void PackDragChip::paint (juce::Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    const bool has = ! files.isEmpty();
+    g.setColour (juce::Colours::black.withAlpha (0.35f)); g.fillRoundedRectangle (r.translated (0, 4), 14.0f);
+    g.setColour (has ? toy::lcdBg : juce::Colour (0xff3a3f52)); g.fillRoundedRectangle (r.withTrimmedBottom (4.0f), 14.0f);
+    auto in = r.withTrimmedBottom (4.0f).reduced (12.0f, 2.0f);
+    g.setColour (has ? toy::lcdInk : toy::cream.withAlpha (0.55f));
+    g.setFont (toy::lcd (has ? 20.0f : 17.0f));
+    g.drawText (has ? (dragging ? juce::String ("DROP ON A DRUM RACK TRACK") : "DRAG " + juce::String (files.size()) + " CLIPS INTO LIVE >")
+                    : juce::String ("PRINT A PACK, THEN DRAG IT HERE"), in, juce::Justification::centredLeft);
+}
+
+void PackDragChip::mouseDrag (const juce::MouseEvent& e)
+{
+    if (files.isEmpty() || dragging || e.getDistanceFromDragStart() < 4) return;
+    dragging = true; repaint();
+    juce::StringArray paths; for (auto& f : files) paths.add (f.getFullPathName());
+    juce::DragAndDropContainer::performExternalDragDropOfFiles (paths, false, this, [this] { dragging = false; repaint(); });
+}
+
+GrooveLab::GrooveLab (ShuffleBuddyProcessor& p, LcdDisplay& l) : proc (p), lcd (l)
+{
+    setOpaque (false);
+    addKnob ("feel", "FEEL", toy::green, "How a drummer plays it: hats lead on the beat and lighten on the offs, each 4-bar phrase leans into its last bar, fills crescendo into the one, energy wanders bar to bar");
+    addKnob ("drift", "DRIFT", toy::spaceCol, "Each limb leans slowly ahead or behind over the bars (the kick stays the anchor). LOOSEN is random wobble; DRIFT is a human pulling and pushing");
+    const char* maps[3] = { "LIVE KITS", "PUSH PADS", "CUSTOM" };
+    const char* mapTips[3] = { "Ableton's drum kits: C1 kick, D1 snare, D#1 clap, C#1 rim, F#1 hat, A#1 open hat, toms spread out, C#2 crash",
+                               "Any Drum Rack / Push: the first pads in order from C1 (bottom-left pad up). Toms take 4 pads: floor, low, mid, high",
+                               "Your own: click a lane below to put it on any note" };
+    for (int i = 0; i < 3; ++i)
+    {
+        mapBtns[i].setButtonText (maps[i]); mapBtns[i].setName ("slot"); mapBtns[i].setWantsKeyboardFocus (false); mapBtns[i].setTooltip (mapTips[i]);
+        mapBtns[i].onClick = [this, i] { if (i < 2) proc.applyNoteMap (i); else proc.setParamValue ("notemap", 2.0f); lcd.flash ("NOTE MAP", mapBtns[i].getButtonText()); };
+        addAndMakeVisible (mapBtns[i]);
+    }
+    for (int i = 0; i < NumPads; ++i)
+    {
+        laneBtns[i].setName ("slot"); laneBtns[i].setWantsKeyboardFocus (false);
+        laneBtns[i].setTooltip ("Which Drum Rack pad this lane plays. Click to move it");
+        laneBtns[i].onClick = [this, i] { noteMenu (i); };
+        addAndMakeVisible (laneBtns[i]);
+    }
+    packBtn.setName ("slot"); packBtn.setWantsKeyboardFocus (false);
+    packBtn.setColour (juce::TextButton::buttonColourId, toy::orange); packBtn.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+    packBtn.setTooltip ("Print a folder of clips from this genre and feel: 4 grooves (A-D), an 8- and a 16-bar phrase, 5 one-bar fills and a 64-bar arrangement (intro, groove, break, build, drop, outro). Every print is a fresh take");
+    packBtn.onClick = [this]
+    {
+        auto files = proc.printPack (proc.packFolder());
+        if (files.isEmpty()) { lcd.flash ("PRINT FAILED", "CHECK DOCUMENTS FOLDER"); return; }
+        chip.files = files; lastPack = files[0].getParentDirectory(); chip.repaint();
+        lcd.flash ("PACK PRINTED", juce::String (files.size()) + " CLIPS");
+    };
+    addAndMakeVisible (packBtn);
+    folderBtn.setName ("slot"); folderBtn.setWantsKeyboardFocus (false);
+    folderBtn.setTooltip ("Show the prints folder (Documents/Shuffle Buddy/Prints). Tip: add it to Live's browser under Places");
+    folderBtn.onClick = [this] { auto d = lastPack.isDirectory() ? lastPack : proc.packFolder(); d.createDirectory(); d.revealToUser(); };
+    addAndMakeVisible (folderBtn);
+    chip.setTooltip ("Drag all the clips onto a Drum Rack track: in Session view they fill the clip slots one under another, in Arrangement they line up end to end");
+    addAndMakeVisible (chip);
+    refresh();
+}
+
+void GrooveLab::addKnob (const juce::String& id, const juce::String& label, juce::Colour c, const juce::String& tip)
+{
+    Knob k;
+    k.s = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow);
+    k.s->setColour (juce::Slider::rotarySliderFillColourId, c);
+    k.s->setColour (juce::Slider::textBoxTextColourId, toy::cream);
+    k.s->setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    k.s->setTextBoxStyle (juce::Slider::TextBoxBelow, true, 80, 16);
+    k.s->getProperties().set ("deck", true);
+    k.s->setWantsKeyboardFocus (false);
+    k.s->setTooltip (tip);
+    k.s->setDoubleClickReturnValue (true, proc.apvts.getParameter (id)->convertFrom0to1 (proc.apvts.getParameter (id)->getDefaultValue()));
+    k.att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, id, *k.s);
+    k.name = std::make_unique<juce::Label> (id, label);
+    k.name->setFont (toy::font (13.0f)); k.name->setColour (juce::Label::textColourId, c); k.name->setJustificationType (juce::Justification::centred);
+    addAndMakeVisible (*k.s); addAndMakeVisible (*k.name);
+    knobs.push_back (std::move (k));
+}
+
+void GrooveLab::noteMenu (int lane)
+{
+    juce::PopupMenu m;
+    const int cur = (int) proc.apvts.getRawParameterValue (ShuffleBuddyProcessor::pid ("note", lane))->load();
+    for (int oct = 0; oct < 4; ++oct)
+    {
+        juce::PopupMenu sub;
+        for (int k = 0; k < 12; ++k) { const int n = 24 + oct * 12 + k; sub.addItem (n + 1, ShuffleBuddyProcessor::noteName (n) + "  (" + juce::String (n) + ")", true, n == cur); }
+        m.addSubMenu ("C" + juce::String (oct) + " - B" + juce::String (oct), sub, true, nullptr, cur >= 24 + oct * 12 && cur < 36 + oct * 12);
+    }
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (laneBtns[lane]), [this, lane] (int r)
+    {
+        if (r <= 0) return;
+        proc.setParamValue (ShuffleBuddyProcessor::pid ("note", lane), (float) (r - 1));
+        proc.setParamValue ("notemap", 2.0f);
+    });
+}
+
+void GrooveLab::refresh()
+{
+    const int map = (int) proc.apvts.getRawParameterValue ("notemap")->load();
+    if (map != lastMap)
+    {
+        lastMap = map;
+        for (int i = 0; i < 3; ++i)
+        {
+            mapBtns[i].setColour (juce::TextButton::buttonColourId, i == map ? toy::green : juce::Colour (0xff3a3f52));
+            mapBtns[i].setColour (juce::TextButton::textColourOffId, i == map ? juce::Colours::white : toy::cream);
+        }
+    }
+    for (int i = 0; i < NumPads; ++i)
+    {
+        const int n = i == Toms ? proc.noteFor (Toms, 0) * 1000 + proc.noteFor (Toms, 3) : proc.noteFor (i, 1);
+        if (n == lastNotes[(size_t) i]) continue;
+        lastNotes[(size_t) i] = n;
+        const juce::String note = i == Toms ? ShuffleBuddyProcessor::noteName (proc.noteFor (Toms, 0)) + "-" + ShuffleBuddyProcessor::noteName (proc.noteFor (Toms, 3))
+                                            : ShuffleBuddyProcessor::noteName (proc.noteFor (i, 1));
+        laneBtns[i].setButtonText (juce::String (ShuffleBuddyProcessor::padName (i)) + "  " + note);
+        laneBtns[i].setColour (juce::TextButton::buttonColourId, toy::padColour (i));
+        laneBtns[i].setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+    }
+}
+
+void GrooveLab::paint (juce::Graphics& g)
+{
+    g.setColour (toy::deck); g.fillRoundedRectangle (getLocalBounds().toFloat(), 24.0f);   // covers the dub deck's labels
+    g.setColour (toy::cream.withAlpha (0.6f)); g.setFont (toy::font (12.0f));
+    g.drawText ("HOW IT'S PLAYED", 20, 10, 240, 14, juce::Justification::centredLeft);
+    g.drawText ("WHERE THE NOTES LAND IN ABLETON", 300, 10, 440, 14, juce::Justification::centredLeft);
+    g.drawText ("PRINT A PACK OF CLIPS", 790, 10, 360, 14, juce::Justification::centredLeft);
+    g.setColour (toy::deckLo);
+    for (float x : { 280.0f, 770.0f }) g.fillRoundedRectangle (x, 12, 3, 118, 1.5f);
+    g.setColour (toy::cream.withAlpha (0.45f)); g.setFont (toy::font (11.0f));
+    g.drawText ("LOOSEN = WOBBLE   FEEL = ACCENTS + BUILDS   DRIFT = LEAN", 20, 126, 260, 14, juce::Justification::centredLeft);
+}
+
+void GrooveLab::resized()
+{
+    for (size_t i = 0; i < knobs.size(); ++i)
+    {
+        const int x = 22 + (int) i * 126;
+        knobs[i].name->setBounds (x, 20, 110, 16);
+        knobs[i].s->setBounds (x + 10, 34, 90, 92);
+    }
+    for (int i = 0; i < 3; ++i) mapBtns[i].setBounds (300 + i * 152, 28, 146, 32);
+    for (int i = 0; i < NumPads; ++i) laneBtns[i].setBounds (300 + (i % 5) * 91, 66 + (i / 5) * 36, 87, 31);
+    packBtn.setBounds (790, 28, 176, 48);
+    folderBtn.setBounds (974, 28, 170, 48);
+    chip.setBounds (790, 84, 354, 48);
+}
+
 // ================================================================ editor
 ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
     : AudioProcessorEditor (&p), proc (p), lcd (p), grid (p)
@@ -1061,15 +1215,6 @@ ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
         g.setColour (toy::deck);     g.fillRoundedRectangle (d.withTrimmedTop (6), 26);
         g.setColour (juce::Colours::white.withAlpha (0.05f));
         for (int i = 0; i < 40; ++i) g.fillEllipse (d.getX() + 30.0f + (float) i * 28.0f, d.getBottom() - 14.0f, 4, 4);
-        // sticker label
-        {
-            juce::Graphics::ScopedSaveState ss (g);
-            g.addTransform (juce::AffineTransform::rotation (-0.06f, 120, 806));
-            g.setColour (juce::Colour (0xffb3420a)); g.fillRoundedRectangle (66, 792, 130, 30, 11);
-            g.setColour (toy::echoCol); g.fillRoundedRectangle (66, 789, 130, 30, 11);
-            g.setColour (juce::Colours::white); g.setFont (toy::font (17.0f));
-            g.drawText ("DUB DECK", 66, 789, 130, 30, juce::Justification::centred);
-        }
         g.setFont (toy::font (12.0f));
         g.setColour (toy::cream.withAlpha (0.6f));
         g.drawText ("ECHO TIME", 214, 830, 236, 14, juce::Justification::centredLeft);
@@ -1235,6 +1380,19 @@ ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
     echoLed.value = [this] { return juce::jlimit (0.0f, 1.0f, proc.echoLevel() * 4.0f); };
     addAndMakeVisible (echoLed);
 
+    // GROOVE LAB + ABLETON shares the tray with the DUB DECK: two tabs
+    grooveLab = std::make_unique<GrooveLab> (proc, lcd);
+    addChildComponent (*grooveLab);
+    for (auto* t : { &deckTab, &labTab })
+    {
+        t->setName ("slot"); t->setWantsKeyboardFocus (false);
+        addAndMakeVisible (*t);
+    }
+    deckTab.setTooltip ("Echo, space, filter, squash and THROW: the sound of the kit");
+    labTab.setTooltip ("Feel, drift, note map for Ableton's Drum Rack, and PRINT PACK");
+    deckTab.onClick = [this] { showGrooveLab (false); };
+    labTab.onClick = [this] { showGrooveLab (true); };
+
     setupBtn (undoBtn, juce::Colours::white, toy::ink, "Undo the last pattern change (Ctrl+Z)");
     undoBtn.setName ("slot");
     undoBtn.onClick = [this] { doUndo(); };
@@ -1290,7 +1448,7 @@ ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
     };
     printBtn.onClick = [this]
     {
-        dragChip.set (proc.printBars (printBars), printBars, proc.apvts.getRawParameterValue ("tempo")->load(), "PRINT");
+        dragChip.set (proc.printBars (printBars), printBars, proc.tempoNow(), "PRINT");
         lcd.flash ("PRINTED " + juce::String (printBars) + " BARS", "DRAG THE CLIP INTO LIVE");
     };
     printBarsBtn.onClick = [this] { printBars = printBars >= 32 ? 4 : printBars * 2; };
@@ -1342,6 +1500,7 @@ ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
     selectPad (1);
     setWantsKeyboardFocus (true);
     setSize (W, H);
+    showGrooveLab ((int) proc.apvts.state.getProperty ("uiTab", 1) == 1);
     startTimerHz (30);
 }
 
@@ -1426,6 +1585,7 @@ void ShuffleBuddyEditor::setParam (const juce::String& id, float value)
 
 void ShuffleBuddyEditor::timerCallback()
 {
+    if (grooveLab != nullptr && grooveLab->isVisible()) grooveLab->refresh();
     // after clicking a knob or button, hand the keyboard back so 1-8, space, T and K keep working
     if (isShowing() && ! hasKeyboardFocus (true))
         if (auto* peer = getPeer())
@@ -1745,4 +1905,22 @@ void ShuffleBuddyEditor::resized()
     grMeter.setBounds (830, dy + 22, 20, 104);
     throwBtn.setBounds (884, dy - 2, 310, 134);
     hint.setBounds (40, 972, 1180, 18);
+    deckTab.setBounds (66, 796, 130, 26);
+    labTab.setBounds (202, 796, 226, 26);
+    grooveLab->setBounds (48, 824, 1164, 142);
+}
+
+void ShuffleBuddyEditor::showGrooveLab (bool on)
+{
+    proc.apvts.state.setProperty ("uiTab", on ? 1 : 0, nullptr);
+    grooveLab->setVisible (on);
+    for (size_t i = 6; i < 10 && i < knobs.size(); ++i) { knobs[i].s->setVisible (! on); knobs[i].name->setVisible (! on); }
+    for (auto& b : timeBtns) b.setVisible (! on);
+    for (auto& b : typeBtns) b.setVisible (! on);
+    throwBtn.setVisible (! on); grMeter.setVisible (! on); echoLed.setVisible (! on);
+    deckTab.setColour (juce::TextButton::buttonColourId, on ? juce::Colour (0xfffff4d6) : toy::echoCol);
+    deckTab.setColour (juce::TextButton::textColourOffId, on ? toy::brown : juce::Colours::white);
+    labTab.setColour (juce::TextButton::buttonColourId, on ? toy::green : juce::Colour (0xfffff4d6));
+    labTab.setColour (juce::TextButton::textColourOffId, on ? juce::Colours::white : toy::brown);
+    repaint();
 }
