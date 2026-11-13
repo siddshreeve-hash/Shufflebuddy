@@ -171,7 +171,7 @@ namespace sounds
     }
 
     // ---------------- KITS: a kick preset + a sound on each of the other seven pads
-    struct Kit { const char* name; const char* kick; const char* pads[7]; };
+    struct Kit { const char* name; const char* kick; const char* pads[NumPads - 1]; };   // unlisted pads keep their sound
     inline const std::vector<Kit>& kits()
     {
         static const std::vector<Kit> k = {

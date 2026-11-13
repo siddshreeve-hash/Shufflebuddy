@@ -8,7 +8,7 @@
 // and the Kick Lab are just different Patches. Velocity-aware: ghost notes come out
 // quieter, darker, shorter and with less pitch sweep, like a real player.
 
-enum Pad { Kick, Snare, Clap, Rim, Hat, OpenHat, Perc, Shaker, NumPads };
+enum Pad { Kick, Snare, Clap, Rim, Hat, OpenHat, Perc, Shaker, Toms, Crash, NumPads };
 
 struct SampleData : juce::ReferenceCountedObject
 {
@@ -99,7 +99,7 @@ public:
         fade = 1.0f; fadeC = std::exp (-1.0f / ((smp != nullptr ? 0.008f : juce::jmax (0.002f, patch.gateFade)) * sr)); gateN = 1 << 30; holdN = 0; attN = 1;
         subA = knA = meA = noA = 0.0f;
 
-        static const float pans[NumPads] = { 0.0f, 0.02f, 0.12f, -0.28f, 0.22f, 0.26f, -0.32f, 0.36f };
+        static const float pans[NumPads] = { 0.0f, 0.02f, 0.12f, -0.28f, 0.22f, 0.26f, -0.32f, 0.36f, -0.15f, 0.3f };
         const float pn = pans[p];
         panL = std::sqrt (0.5f * (1.0f - pn)) * 1.414f;
         panR = std::sqrt (0.5f * (1.0f + pn)) * 1.414f;

@@ -4,7 +4,7 @@
 namespace
 {
     constexpr int W = 1260, H = 1050;
-    constexpr int gridLabelW = 92, gridPushW = 58, gridPad = 16, gridTop = 42, gridRowH = 44;
+    constexpr int gridLabelW = 108, gridPushW = 50, gridSwingW = 46, gridPad = 14, gridTop = 66, gridRowH = 38;
 }
 
 namespace toy
@@ -255,20 +255,26 @@ void FxMeter::paint (juce::Graphics& g)
 }
 
 // ================================================================ step grid
-juce::Rectangle<float> StepGrid::labelRect (int pad) const
-{
-    return { (float) gridPad, (float) (gridTop + pad * gridRowH + 4), (float) gridLabelW, (float) (gridRowH - 10) };
-}
-juce::Rectangle<float> StepGrid::pushRect (int pad) const
-{
-    return { (float) (getWidth() - gridPad - gridPushW), (float) (gridTop + pad * gridRowH + 7), (float) gridPushW, (float) (gridRowH - 16) };
-}
+juce::Rectangle<float> StepGrid::labelRect (int pad) const { return { (float) gridPad, (float) (gridTop + pad * gridRowH + 3), (float) gridLabelW - 40.0f, (float) (gridRowH - 8) }; }
+juce::Rectangle<float> StepGrid::muteRect (int pad) const  { return { (float) gridPad + gridLabelW - 37.0f, (float) (gridTop + pad * gridRowH + 7), 17.0f, (float) (gridRowH - 16) }; }
+juce::Rectangle<float> StepGrid::soloRect (int pad) const  { return { (float) gridPad + gridLabelW - 18.0f, (float) (gridTop + pad * gridRowH + 7), 17.0f, (float) (gridRowH - 16) }; }
+juce::Rectangle<float> StepGrid::pushRect (int pad) const  { return { (float) (getWidth() - gridPad - gridPushW), (float) (gridTop + pad * gridRowH + 6), (float) gridPushW, (float) (gridRowH - 14) }; }
+juce::Rectangle<float> StepGrid::swingRect (int pad) const { return { (float) (getWidth() - gridPad - gridPushW - 6 - gridSwingW), (float) (gridTop + pad * gridRowH + 6), (float) gridSwingW, (float) (gridRowH - 14) }; }
+juce::Rectangle<float> StepGrid::tabRect (int tab) const    { return { (float) gridPad + (float) tab * 104.0f, 8.0f, 98.0f, 26.0f }; }
 juce::Rectangle<float> StepGrid::cellRect (int pad, int step) const
 {
-    const float x0 = (float) (gridPad + gridLabelW + 10), x1 = (float) (getWidth() - gridPad - gridPushW - 10);
+    const float x0 = (float) (gridPad + gridLabelW + 8), x1 = (float) (getWidth() - gridPad - gridPushW - 6 - gridSwingW - 8);
     const float cw = (x1 - x0) / 16.0f;
-    return { x0 + cw * (float) step + 2.0f, (float) (gridTop + pad * gridRowH + 4), cw - 4.0f, (float) (gridRowH - 10) };
+    return { x0 + cw * (float) step + 2.0f, (float) (gridTop + pad * gridRowH + 3), cw - 4.0f, (float) (gridRowH - 8) };
 }
+float StepGrid::lean() const { return (proc.apvts.getRawParameterValue ("swing")->load() - 50.0f) / 25.0f * 9.0f; }
+
+static const char* modeNames[] = { "NOTES", "VELOCITY", "CHANCE", "NUDGE", "RATCHET" };
+static const char* modeHelp[] = { "CLICK: ADD > BIG > GHOST > OFF   SHIFT: BIG   RIGHT-CLICK: GHOST   TOMS: CLICK CYCLES LOW > MID > HIGH > FLOOR",
+                                  "DRAG UP/DOWN ON A HIT TO SET ITS VELOCITY   RIGHT-CLICK: RESET",
+                                  "DRAG UP/DOWN: CHANCE THE HIT PLAYS EACH BAR   RIGHT-CLICK: 100%",
+                                  "DRAG LEFT/RIGHT: PLAY THE HIT EARLY OR LATE   RIGHT-CLICK: ON THE GRID",
+                                  "CLICK: 1 > 2 > 3 > 4 HITS IN THE STEP (ROLLS, TRIPLET HATS)   RIGHT-CLICK: 1" };
 
 void StepGrid::paint (juce::Graphics& g)
 {
@@ -281,156 +287,271 @@ void StepGrid::paint (juce::Graphics& g)
     const int slot = proc.viewSlot();
     const bool playing = proc.apvts.getRawParameterValue ("play")->load() > 0.5f;
     const int cur = playing ? proc.playStep() : -1;
-    const float swing = (proc.apvts.getRawParameterValue ("swing")->load() - 50.0f) / 25.0f;   // 0..1
-    const float lean = swing * 9.0f;
+    const float ln = lean();
 
-    // header
-    g.setFont (toy::font (13.0f));
+    // edit-mode tabs
+    for (int t = 0; t < NumModes; ++t)
+    {
+        auto tr = tabRect (t);
+        const bool on = t == mode;
+        g.setColour (on ? toy::ink : juce::Colour (0xffe9ddbf));
+        g.fillRoundedRectangle (tr, 10.0f);
+        g.setColour (on ? toy::yellow : toy::brown);
+        g.setFont (toy::font (14.0f));
+        g.drawText (modeNames[t], tr, juce::Justification::centred);
+    }
+    g.setFont (toy::font (12.0f));
     g.setColour (toy::brown);
-    g.drawText ("DRUM", gridPad, 14, gridLabelW, 20, juce::Justification::centredLeft);
-    g.drawText ("PUSH", getWidth() - gridPad - gridPushW, 14, gridPushW, 20, juce::Justification::centred);
+    g.drawText ("SWING", swingRect (0).withY (40.0f).withHeight (20.0f), juce::Justification::centred);
+    g.drawText ("PUSH", pushRect (0).withY (40.0f).withHeight (20.0f), juce::Justification::centred);
+    g.drawText ("M  S", juce::Rectangle<float> ((float) gridPad + gridLabelW - 38.0f, 40.0f, 38.0f, 20.0f), juce::Justification::centred);
     for (int s = 0; s < 16; ++s)
     {
         auto c = cellRect (0, s);
         g.setColour (s == cur ? toy::red : toy::brown);
-        g.drawText (s % 4 == 0 ? juce::String (s / 4 + 1) : juce::String ("."), juce::Rectangle<float> (c.getX() + ((s & 1) ? lean : 0.0f), 14.0f, c.getWidth(), 20.0f), juce::Justification::centred);
+        g.setFont (toy::font (13.0f));
+        g.drawText (s % 4 == 0 ? juce::String (s / 4 + 1) : juce::String ("."), juce::Rectangle<float> (c.getX() + ((s & 1) ? ln : 0.0f), 40.0f, c.getWidth(), 20.0f), juce::Justification::centred);
     }
+
+    bool anySolo = false;
+    for (int pd = 0; pd < NumPads; ++pd) anySolo = anySolo || proc.apvts.getRawParameterValue (ShuffleBuddyProcessor::pid ("solo", pd))->load() > 0.5f;
 
     for (int pd = 0; pd < NumPads; ++pd)
     {
         const auto col = toy::padColour (pd);
+        const bool muted = proc.apvts.getRawParameterValue (ShuffleBuddyProcessor::pid ("mute", pd))->load() > 0.5f;
+        const bool soloed = proc.apvts.getRawParameterValue (ShuffleBuddyProcessor::pid ("solo", pd))->load() > 0.5f;
+        const bool silent = anySolo ? ! soloed : muted;
         auto lr = labelRect (pd);
-        g.setColour (col.darker (0.45f));
-        g.fillRoundedRectangle (lr.translated (0, 4), 12.0f);
-        g.setColour (col);
-        g.fillRoundedRectangle (lr, 12.0f);
+        g.setColour (col.darker (0.45f).withMultipliedAlpha (silent ? 0.4f : 1.0f));
+        g.fillRoundedRectangle (lr.translated (0, 3), 10.0f);
+        g.setColour (col.withMultipliedAlpha (silent ? 0.4f : 1.0f));
+        g.fillRoundedRectangle (lr, 10.0f);
         g.setColour (juce::Colours::white);
-        g.setFont (toy::font (15.0f));
+        g.setFont (toy::font (14.0f));
         g.drawText (ShuffleBuddyProcessor::padName (pd), lr, juce::Justification::centred);
+        auto toggle = [&] (juce::Rectangle<float> tr, bool on, juce::Colour c, const char* t)
+        {
+            g.setColour (on ? c : juce::Colour (0xffe9ddbf)); g.fillRoundedRectangle (tr, 5.0f);
+            g.setColour (on ? juce::Colours::white : toy::brown); g.setFont (toy::font (12.0f)); g.drawText (t, tr, juce::Justification::centred);
+        };
+        toggle (muteRect (pd), muted, toy::red, "M");
+        toggle (soloRect (pd), soloed, toy::orange, "S");
 
         for (int s = 0; s < 16; ++s)
         {
             auto c = cellRect (pd, s);
-            if (s & 1) c = c.translated (lean, 0.0f);   // off-beats lean right: that's the swing
+            if (s & 1) c = c.translated (ln, 0.0f);   // off-beats lean right: that's the swing
             const bool beatShade = (s / 4) % 2 == 0;
             g.setColour (s == cur ? juce::Colour (0xffffe9a8) : (beatShade ? juce::Colour (0xfff1e6cc) : juce::Colour (0xffe9ddbf)));
-            g.fillRoundedRectangle (c, 10.0f);
-            const int v = proc.cell (slot, pd, s);
-            auto dot = [&] (int lv, float alpha)
+            g.fillRoundedRectangle (c, 8.0f);
+            const auto cd = proc.cellData (slot, pd, s);
+            const int v = groove::levelOfVel (cd.vel);
+            auto dot = [&] (int lv, float alpha, juce::Point<float> at)
             {
-                const float d = lv == 3 ? 22.0f : lv == 2 ? 16.0f : 10.0f;
-                g.setColour ((lv == 1 ? juce::Colour (0xff9aa1b6) : (lv == 3 ? col.darker (0.2f) : toy::ink)).withMultipliedAlpha (alpha));
-                g.fillEllipse (c.getCentreX() - d * 0.5f, c.getCentreY() - d * 0.5f, d, d);
+                const float d = lv == 3 ? 20.0f : lv == 2 ? 15.0f : 9.0f;
+                g.setColour ((lv == 1 ? juce::Colour (0xff9aa1b6) : (lv == 3 ? col.darker (0.2f) : toy::ink)).withMultipliedAlpha (alpha * (silent ? 0.35f : 1.0f)));
+                g.fillEllipse (at.x - d * 0.5f, at.y - d * 0.5f, d, d);
             };
-            // live view: show what the sequencer is really playing this bar, and why it differs from the pattern
             const bool live = playing && proc.playedSlot() == slot;
             const int pv = live ? proc.playedCell (pd, s) : v;
             const int src = live ? proc.playedSource (pd, s) : 0;
+            auto centre = c.getCentre().translated (mode == Nudge || cd.nudge != 0 ? (float) cd.nudge / 100.0f * c.getWidth() * 0.8f : 0.0f, 0.0f);
             if (src == ShuffleBuddyProcessor::Dropped)
             {
-                dot (v, 0.22f);
+                dot (v, 0.22f, centre);
                 g.setColour (toy::green.withAlpha (0.8f));
-                g.drawLine (c.getCentreX() - 6, c.getCentreY() - 6, c.getCentreX() + 6, c.getCentreY() + 6, 2.0f);
-                g.drawLine (c.getCentreX() + 6, c.getCentreY() - 6, c.getCentreX() - 6, c.getCentreY() + 6, 2.0f);
+                g.drawLine (centre.x - 6, centre.y - 6, centre.x + 6, centre.y + 6, 2.0f);
+                g.drawLine (centre.x + 6, centre.y - 6, centre.x - 6, centre.y + 6, 2.0f);
             }
             else if (src != 0 && pv > 0)
             {
                 const auto sc = src == ShuffleBuddyProcessor::FromGhosts ? toy::blue : src == ShuffleBuddyProcessor::FromFill ? toy::orange : toy::green;
-                g.setColour (sc.withAlpha (0.22f));
-                g.fillRoundedRectangle (c.reduced (2.0f), 8.0f);
-                g.setColour (sc);
-                g.drawRoundedRectangle (c.reduced (2.0f), 8.0f, 2.5f);
-                dot (pv, 1.0f);
+                g.setColour (sc.withAlpha (0.22f)); g.fillRoundedRectangle (c.reduced (1.5f), 7.0f);
+                g.setColour (sc); g.drawRoundedRectangle (c.reduced (1.5f), 7.0f, 2.5f);
+                dot (pv, 1.0f, c.getCentre());
             }
-            else if (pv > 0) dot (pv, 1.0f);
-            if (live && s == cur && pv > 0)   // the hit happening right now
+            else if (pv > 0 || v > 0)
+            {
+                if (mode == Velocity && cd.on())   // velocity bar
+                {
+                    const float h = (c.getHeight() - 6.0f) * (float) cd.vel / 127.0f;
+                    g.setColour (col.withAlpha (0.85f));
+                    g.fillRoundedRectangle (c.getX() + 4.0f, c.getBottom() - 3.0f - h, c.getWidth() - 8.0f, h, 4.0f);
+                    g.setColour (toy::ink); g.setFont (toy::lcd (16.0f));
+                    g.drawText (juce::String (cd.vel), c.withTrimmedBottom (c.getHeight() * 0.55f), juce::Justification::centred);
+                }
+                else dot (live ? pv : v, 1.0f, centre);
+            }
+            if (cd.on())   // small badges: chance, ratchet, nudge, tom pitch
+            {
+                g.setFont (toy::font (10.0f));
+                if (pd == Toms) { static const char* tn[4] = { "F", "L", "M", "H" }; g.setColour (juce::Colours::white); g.setFont (toy::font (10.0f)); g.drawText (tn[cd.alt & 3], juce::Rectangle<float> (centre.x - 8, centre.y - 7, 16, 14), juce::Justification::centred); }
+                if (cd.prob < 100 || mode == Chance)
+                {
+                    g.setColour (toy::purple);
+                    if (mode == Chance) { g.setFont (toy::lcd (16.0f)); g.drawText (juce::String ((int) cd.prob) + "%", c.withTrimmedTop (c.getHeight() * 0.5f), juce::Justification::centred); }
+                    else g.drawText ("?", c.removeFromTop (12.0f).removeFromRight (10.0f), juce::Justification::centred);
+                }
+                if (cd.ratchet > 1 || mode == Ratchet)
+                {
+                    g.setColour (toy::orange);
+                    g.setFont (toy::font (mode == Ratchet ? 13.0f : 10.0f));
+                    g.drawText ("x" + juce::String ((int) cd.ratchet), cellRect (pd, s).translated ((s & 1) ? ln : 0.0f, 0.0f).removeFromBottom (13.0f).removeFromRight (mode == Ratchet ? 26.0f : 16.0f), juce::Justification::centred);
+                }
+                if (mode == Nudge && cd.nudge != 0)
+                {
+                    g.setColour (toy::teal); g.setFont (toy::lcd (15.0f));
+                    g.drawText ((cd.nudge > 0 ? "+" : "") + juce::String ((int) cd.nudge), cellRect (pd, s).translated ((s & 1) ? ln : 0.0f, 0.0f).removeFromBottom (14.0f), juce::Justification::centred);
+                }
+            }
+            if (live && s == cur && pv > 0 && ! silent)
             {
                 g.setColour (juce::Colours::white.withAlpha (0.85f));
-                g.drawEllipse (c.getCentreX() - 15, c.getCentreY() - 15, 30, 30, 3.0f);
+                g.drawEllipse (c.getCentreX() - 13, c.getCentreY() - 13, 26, 26, 2.5f);
             }
         }
 
-        auto pr = pushRect (pd);
-        g.setColour (toy::bezel);
-        g.fillRoundedRectangle (pr, pr.getHeight() * 0.5f);
-        g.setColour (toy::lcdBg);
-        g.setFont (toy::lcd (21.0f));
-        g.drawText (proc.apvts.getParameter (ShuffleBuddyProcessor::pid ("push", pd))->getCurrentValueAsText().toUpperCase(), pr, juce::Justification::centred);
+        auto chip = [&] (juce::Rectangle<float> pr, const juce::String& txt)
+        {
+            g.setColour (toy::bezel); g.fillRoundedRectangle (pr, pr.getHeight() * 0.5f);
+            g.setColour (toy::lcdBg); g.setFont (toy::lcd (19.0f)); g.drawText (txt, pr, juce::Justification::centred);
+        };
+        chip (swingRect (pd), juce::String (juce::roundToInt (proc.apvts.getRawParameterValue (ShuffleBuddyProcessor::pid ("lswing", pd))->load() * 100)) + "%");
+        chip (pushRect (pd), proc.apvts.getParameter (ShuffleBuddyProcessor::pid ("push", pd))->getCurrentValueAsText().toUpperCase());
     }
 
-    // legend
-    const float ly = (float) (gridTop + NumPads * gridRowH + 8);
+    // legend / help
+    const float ly = (float) (gridTop + NumPads * gridRowH + 6);
     float lx = (float) gridPad;
-    g.setFont (toy::fontMed (13.0f));
-    auto legend = [&] (float d, juce::Colour c, const juce::String& txt)
-    {
-        g.setColour (c); g.fillEllipse (lx, ly + 9.0f - d * 0.5f, d, d);
-        lx += d + 6.0f;
-        g.setColour (toy::brown);
-        const float tw = toy::fontMed (13.0f).getStringWidthFloat (txt) + 4.0f;
-        g.drawText (txt, juce::Rectangle<float> (lx, ly, tw, 18.0f), juce::Justification::centredLeft);
-        lx += tw + 14.0f;
-    };
-    legend (16, toy::red, "BIG HIT");
-    legend (12, toy::ink, "NORMAL");
-    legend (8, juce::Colour (0xff9aa1b6), "GHOST");
+    g.setFont (toy::fontMed (12.0f));
     if (playing)
     {
-        auto chip = [&] (juce::Colour c, const juce::String& txt)
+        auto chipL = [&] (juce::Colour c, const juce::String& txt)
         {
-            const float tw = toy::fontMed (13.0f).getStringWidthFloat (txt) + 18.0f;
-            g.setColour (c.withAlpha (0.22f)); g.fillRoundedRectangle (lx, ly - 1, tw, 20, 7);
-            g.setColour (c); g.drawRoundedRectangle (lx, ly - 1, tw, 20, 7, 2.0f);
-            g.setColour (toy::ink); g.drawText (txt, juce::Rectangle<float> (lx, ly, tw, 18.0f), juce::Justification::centred);
+            const float tw = toy::fontMed (12.0f).getStringWidthFloat (txt) + 16.0f;
+            g.setColour (c.withAlpha (0.22f)); g.fillRoundedRectangle (lx, ly - 1, tw, 19, 7);
+            g.setColour (c); g.drawRoundedRectangle (lx, ly - 1, tw, 19, 7, 2.0f);
+            g.setColour (toy::ink); g.drawText (txt, juce::Rectangle<float> (lx, ly, tw, 17.0f), juce::Justification::centred);
             lx += tw + 8.0f;
         };
-        chip (toy::blue, "+ GHOSTS");
-        chip (toy::green, "+ VARIETY");
-        chip (toy::orange, "+ FILL");
-        g.setColour (toy::green); g.setFont (toy::fontMed (13.0f));
-        g.drawText ("X = DROPPED THIS BAR", juce::Rectangle<float> (lx, ly, 200.0f, 18.0f), juce::Justification::centredLeft);
-        return;
+        chipL (toy::blue, "+ GHOSTS"); chipL (toy::green, "+ VARIETY"); chipL (toy::orange, "+ FILL");
+        g.setColour (toy::green);
+        g.drawText ("X = DROPPED (VARIETY OR CHANCE)", juce::Rectangle<float> (lx, ly, 260.0f, 17.0f), juce::Justification::centredLeft);
     }
-    g.setColour (toy::brown);
-    g.drawText ("CLICK: ADD > BIG > GHOST > OFF   RIGHT-CLICK: GHOST   DRAG PUSH: EARLY/LATE", juce::Rectangle<float> (lx, ly, (float) getWidth() - lx - gridPad, 18.0f), juce::Justification::centredRight);
+    else
+    {
+        g.setColour (toy::brown);
+        g.drawText (modeHelp[mode], juce::Rectangle<float> (lx, ly, (float) getWidth() - 2.0f * gridPad, 17.0f), juce::Justification::centredLeft);
+    }
 }
 
 StepGrid::Hit StepGrid::hitTest (juce::Point<int> p) const
 {
     Hit h;
     const auto pf = p.toFloat();
-    const float lean = (proc.apvts.getRawParameterValue ("swing")->load() - 50.0f) / 25.0f * 9.0f;
+    for (int t = 0; t < NumModes; ++t) if (tabRect (t).contains (pf)) { h.tab = t; return h; }
+    const float ln = lean();
     for (int pd = 0; pd < NumPads; ++pd)
     {
         if (pushRect (pd).expanded (2).contains (pf)) { h.pad = pd; h.push = true; return h; }
+        if (swingRect (pd).expanded (2).contains (pf)) { h.pad = pd; h.swing = true; return h; }
+        if (muteRect (pd).expanded (1).contains (pf)) { h.pad = pd; h.mute = true; return h; }
+        if (soloRect (pd).expanded (1).contains (pf)) { h.pad = pd; h.solo = true; return h; }
         if (labelRect (pd).contains (pf)) { h.pad = pd; h.label = true; return h; }
         for (int s = 0; s < 16; ++s)
         {
             auto c = cellRect (pd, s);
-            if (s & 1) c = c.translated (lean, 0.0f);
-            if (c.expanded (2.0f, 4.0f).contains (pf)) { h.pad = pd; h.step = s; return h; }
+            if (s & 1) c = c.translated (ln, 0.0f);
+            if (c.expanded (2.0f, 3.0f).contains (pf)) { h.pad = pd; h.step = s; return h; }
         }
     }
     return h;
 }
 
+void StepGrid::editValue (int pad, int step, const juce::MouseEvent& e, bool first)
+{
+    const int slot = proc.viewSlot();
+    auto c = proc.cellData (slot, pad, step);
+    if (! c.on()) return;
+    const auto cr = cellRect (pad, step);
+    if (e.mods.isPopupMenu() && first)
+    {
+        if (mode == Velocity) c.vel = 100;
+        if (mode == Chance) c.prob = 100;
+        if (mode == Nudge) c.nudge = 0;
+        if (mode == Ratchet) c.ratchet = 1;
+        proc.setCellData (slot, pad, step, c); repaint(); return;
+    }
+    if (mode == Velocity)
+    {
+        const float y = (float) e.getEventRelativeTo (this).y;
+        c.vel = (juce::uint8) juce::jlimit (1, 127, juce::roundToInt ((cr.getBottom() - y) / cr.getHeight() * 127.0f));
+        if (onInfo) onInfo (juce::String (ShuffleBuddyProcessor::padName (pad)) + " STEP " + juce::String (step + 1), "VELOCITY " + juce::String ((int) c.vel));
+    }
+    else if (mode == Chance)
+    {
+        if (first) dragStartVal = (float) c.prob;
+        c.prob = (juce::uint8) juce::jlimit (1, 100, juce::roundToInt (dragStartVal + (dragStartY - (float) e.getEventRelativeTo (this).y) * 0.8f));
+        if (onInfo) onInfo (juce::String (ShuffleBuddyProcessor::padName (pad)) + " STEP " + juce::String (step + 1), "CHANCE " + juce::String ((int) c.prob) + "%");
+    }
+    else if (mode == Nudge)
+    {
+        if (first) dragStartVal = (float) c.nudge;
+        c.nudge = (juce::int8) juce::jlimit (-50, 50, juce::roundToInt (dragStartVal + ((float) e.getEventRelativeTo (this).x - dragStartX) * 0.8f));
+        if (onInfo) onInfo (juce::String (ShuffleBuddyProcessor::padName (pad)) + " STEP " + juce::String (step + 1), juce::String ("NUDGE ") + (c.nudge > 0 ? "LATE +" : c.nudge < 0 ? "EARLY " : "") + juce::String ((int) c.nudge) + "%");
+    }
+    else if (mode == Ratchet && first)
+    {
+        c.ratchet = (juce::uint8) (c.ratchet % 4 + 1);
+        if (onInfo) onInfo (juce::String (ShuffleBuddyProcessor::padName (pad)) + " STEP " + juce::String (step + 1), "RATCHET x" + juce::String ((int) c.ratchet));
+        proc.auditionPad (pad, 0.8f);
+    }
+    proc.setCellData (slot, pad, step, c);
+    repaint();
+}
+
 void StepGrid::mouseDown (const juce::MouseEvent& e)
 {
     const auto h = hitTest (e.getPosition());
+    if (h.tab >= 0) { mode = h.tab; repaint(); return; }
     if (h.pad < 0) return;
+    auto toggleParam = [&] (const juce::String& id) { proc.setParamValue (id, proc.apvts.getRawParameterValue (id)->load() > 0.5f ? 0.0f : 1.0f); repaint(); };
+    if (h.mute) { toggleParam (ShuffleBuddyProcessor::pid ("mute", h.pad)); return; }
+    if (h.solo) { toggleParam (ShuffleBuddyProcessor::pid ("solo", h.pad)); return; }
     if (h.label) { if (onSelectPad) onSelectPad (h.pad); proc.auditionPad (h.pad, 0.85f); return; }
-    if (h.push)
+    if (h.push || h.swing)
     {
-        dragPushPad = h.pad; dragStartY = (float) e.y;
-        auto* prm = proc.apvts.getParameter (ShuffleBuddyProcessor::pid ("push", h.pad));
-        dragStartPush = prm->convertFrom0to1 (prm->getValue());
+        const auto id = ShuffleBuddyProcessor::pid (h.push ? "push" : "lswing", h.pad);
+        (h.push ? dragPushPad : dragSwingPad) = h.pad; dragStartY = (float) e.y;
+        auto* prm = proc.apvts.getParameter (id);
+        dragStartVal = prm->convertFrom0to1 (prm->getValue());
         prm->beginChangeGesture();
         if (onSelectPad) onSelectPad (h.pad);
         return;
     }
     const int slot = proc.viewSlot();
-    const int v = proc.cell (slot, h.pad, h.step);
     proc.pushUndo (slot);
+    if (mode != Notes)
+    {
+        dragPad = h.pad; dragStep = h.step; dragStartY = (float) e.y; dragStartX = (float) e.x;
+        editValue (h.pad, h.step, e, true);
+        return;
+    }
+    auto c = proc.cellData (slot, h.pad, h.step);
+    if (h.pad == Toms && ! e.mods.isPopupMenu())   // toms: off > low > mid > high > floor > off
+    {
+        static const int nextAlt[4] = { -1, 2, 3, 0 };
+        if (! c.on()) c = groove::hit (e.mods.isShiftDown() ? 127 : 100, 1);
+        else if (nextAlt[c.alt & 3] < 0) c = groove::Cell();
+        else c.alt = (juce::uint8) nextAlt[c.alt & 3];
+        proc.setCellData (slot, h.pad, h.step, c);
+        if (c.on()) proc.auditionPad (h.pad, 0.8f);
+        paintValue = -1;
+        repaint();
+        return;
+    }
+    const int v = groove::levelOfVel (c.vel);
     int nv;
     if (e.mods.isPopupMenu()) nv = v == 1 ? 0 : 1;
     else if (e.mods.isShiftDown()) nv = 3;
@@ -445,17 +566,30 @@ void StepGrid::mouseDown (const juce::MouseEvent& e)
 
 void StepGrid::mouseDrag (const juce::MouseEvent& e)
 {
-    if (dragPushPad >= 0)
+    if (dragPushPad >= 0 || dragSwingPad >= 0)
     {
-        auto* prm = proc.apvts.getParameter (ShuffleBuddyProcessor::pid ("push", dragPushPad));
-        const float v = juce::jlimit (-20.0f, 30.0f, dragStartPush + (dragStartY - (float) e.y) * 0.25f);
+        const bool push = dragPushPad >= 0;
+        auto* prm = proc.apvts.getParameter (ShuffleBuddyProcessor::pid (push ? "push" : "lswing", push ? dragPushPad : dragSwingPad));
+        const float v = push ? juce::jlimit (-20.0f, 30.0f, dragStartVal + (dragStartY - (float) e.y) * 0.25f)
+                             : juce::jlimit (0.0f, 1.5f, dragStartVal + (dragStartY - (float) e.y) * 0.01f);
         prm->setValueNotifyingHost (prm->convertTo0to1 (v));
+        if (onInfo) onInfo (juce::String (ShuffleBuddyProcessor::padName (push ? dragPushPad : dragSwingPad)) + (push ? " PUSH" : " SWING"), prm->getCurrentValueAsText().toUpperCase() + (push ? "" : " OF MAIN SWING"));
         repaint();
+        return;
+    }
+    if (dragPad >= 0)
+    {
+        if (mode == Velocity)   // drawing velocities across a row
+        {
+            const auto h = hitTest (e.getPosition());
+            if (h.pad == dragPad && h.step >= 0) editValue (h.pad, h.step, e, false);
+        }
+        else if (mode == Chance || mode == Nudge) editValue (dragPad, dragStep, e, false);
         return;
     }
     if (paintValue < 0) return;
     const auto h = hitTest (e.getPosition());
-    if (h.pad < 0 || h.step < 0 || painted[(size_t) h.pad][(size_t) h.step]) return;
+    if (h.pad < 0 || h.step < 0 || h.pad == Toms || painted[(size_t) h.pad][(size_t) h.step]) return;
     painted[(size_t) h.pad][(size_t) h.step] = true;
     proc.setCell (proc.viewSlot(), h.pad, h.step, (juce::uint8) paintValue);
     repaint();
@@ -464,16 +598,17 @@ void StepGrid::mouseDrag (const juce::MouseEvent& e)
 void StepGrid::mouseUp (const juce::MouseEvent&)
 {
     if (dragPushPad >= 0) proc.apvts.getParameter (ShuffleBuddyProcessor::pid ("push", dragPushPad))->endChangeGesture();
-    dragPushPad = -1; paintValue = -1;
+    if (dragSwingPad >= 0) proc.apvts.getParameter (ShuffleBuddyProcessor::pid ("lswing", dragSwingPad))->endChangeGesture();
+    dragPushPad = dragSwingPad = dragPad = dragStep = -1; paintValue = -1;
 }
 
 void StepGrid::mouseDoubleClick (const juce::MouseEvent& e)
 {
     const auto h = hitTest (e.getPosition());
-    if (h.pad >= 0 && h.push)
+    if (h.pad >= 0 && (h.push || h.swing))
     {
-        auto* prm = proc.apvts.getParameter (ShuffleBuddyProcessor::pid ("push", h.pad));
-        prm->setValueNotifyingHost (prm->convertTo0to1 (0.0f));
+        auto* prm = proc.apvts.getParameter (ShuffleBuddyProcessor::pid (h.push ? "push" : "lswing", h.pad));
+        prm->setValueNotifyingHost (prm->getDefaultValue());
         repaint();
     }
 }
@@ -824,6 +959,51 @@ void KickLab::resized()
     place (15, 618, 380, 68); place (16, 686, 380, 68);  // real kick, room mic
 }
 
+// ================================================================ MIDI drag chip
+juce::File MidiDragChip::writeTemp() const
+{
+    auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("ShuffleBuddy");
+    dir.createDirectory();
+    auto f = dir.getNonexistentChildFile ("Shuffle Buddy " + label.removeCharacters (":/\\") + " " + juce::String (numBars) + " bars", ".mid", false);
+    ShuffleBuddyProcessor::writeMidiFile (seq, tempo, f);
+    return f;
+}
+
+void MidiDragChip::paint (juce::Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    const bool has = hasClip();
+    g.setColour (toy::ink); g.fillRoundedRectangle (r.translated (0, 4), 14.0f);
+    g.setColour (has ? toy::lcdBg : juce::Colour (0xffe9ddbf)); g.fillRoundedRectangle (r.withTrimmedBottom (4.0f), 14.0f);
+    auto in = r.withTrimmedBottom (4.0f).reduced (10.0f, 2.0f);
+    if (has)
+    {   // a tiny piano-roll of the clip
+        const double total = (double) numBars * 16.0 * 240.0;
+        auto roll = in.removeFromRight (in.getWidth() * 0.42f).reduced (2.0f, 5.0f);
+        g.setColour (toy::lcdInk.withAlpha (0.15f)); g.fillRoundedRectangle (roll, 4.0f);
+        g.setColour (toy::lcdInk);
+        for (int i = 0; i < seq.getNumEvents(); ++i)
+        {
+            const auto& m = seq.getEventPointer (i)->message;
+            if (! m.isNoteOn()) continue;
+            const float x = roll.getX() + (float) (m.getTimeStamp() / total) * roll.getWidth();
+            const float y = roll.getBottom() - 3.0f - (float) juce::jlimit (0, 15, m.getNoteNumber() - 36) / 15.0f * (roll.getHeight() - 6.0f);
+            g.fillRect (x, y - 1.0f, 2.0f, 2.5f);
+        }
+    }
+    g.setColour (has ? toy::lcdInk : toy::brown);
+    g.setFont (toy::lcd (has ? 22.0f : 19.0f));
+    g.drawText (has ? (dragging ? juce::String ("DROP IT ON A MIDI TRACK") : "DRAG " + label + " " + juce::String (numBars) + " BARS >") : juce::String ("PRINT OR REC, THEN DRAG HERE"), in, juce::Justification::centredLeft);
+}
+
+void MidiDragChip::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! hasClip() || dragging || e.getDistanceFromDragStart() < 4) return;
+    dragging = true; repaint();
+    const auto f = writeTemp();
+    juce::DragAndDropContainer::performExternalDragDropOfFiles ({ f.getFullPathName() }, false, this, [this] { dragging = false; repaint(); });
+}
+
 // ================================================================ editor
 ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
     : AudioProcessorEditor (&p), proc (p), lcd (p), grid (p)
@@ -1039,6 +1219,71 @@ ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
         lcd.flash (c == 0 ? juce::String ("CHAIN OFF") : "CHAIN " + proc.apvts.getParameter ("chain")->getCurrentValueAsText(), c == 0 ? juce::String ("ONE PATTERN LOOPS") : juce::String ("ONE BAR EACH"));
     };
 
+    // fills: type, length, auto every N bars, crash after
+    auto pillBtn = [&] (juce::TextButton& b, const juce::String& tip)
+    {
+        b.setName ("slot"); b.setWantsKeyboardFocus (false); b.setTooltip (tip);
+        b.setColour (juce::TextButton::buttonColourId, juce::Colours::white);
+        b.setColour (juce::TextButton::textColourOffId, toy::ink);
+        addAndMakeVisible (b);
+    };
+    pillBtn (fillTypeBtn, "Fill type: AUTO picks one that suits the style. TOMS walk down the kit, ROLL builds the snare, KICKS doubles the kick, HATS lifts with open hats, DROP cuts everything but the hats");
+    pillBtn (fillLenBtn, "How long the fill is: the last beat, the last two beats, or the whole bar");
+    pillBtn (autoFillBtn, "Play a fill automatically every 4, 8 or 16 bars");
+    pillBtn (crashBtn, "Land the fill with a crash on the next bar");
+    auto cycle = [this] (const char* id, int n) { setParam (id, (float) (((int) proc.apvts.getRawParameterValue (id)->load() + 1) % n)); };
+    fillTypeBtn.onClick = [this, cycle] { cycle ("filltype", 6); };
+    fillLenBtn.onClick = [this, cycle] { cycle ("filllen", 3); };
+    autoFillBtn.onClick = [this, cycle] { cycle ("autofill", 4); };
+    crashBtn.onClick = [this] { setParam ("fillcrash", proc.apvts.getRawParameterValue ("fillcrash")->load() > 0.5f ? 0.0f : 1.0f); };
+
+    // MIDI: record what plays, print N bars, drag into Live, save, MIDI out to the DAW
+    pillBtn (recBtn, "Record what actually plays (fills, ghosts, variety and all) from the next bar. Press again to stop, then drag the clip into Live");
+    pillBtn (printBtn, "Render a fresh take of N bars instantly, with variety, ghosts, chance and auto fills baked in");
+    pillBtn (printBarsBtn, "How many bars PRINT renders");
+    pillBtn (saveBtn, "Save the clip as a .mid file");
+    pillBtn (midiOutBtn, "Send every note this plays out of the plugin, so the DAW can record it or play a Drum Rack with it");
+    recBtn.setColour (juce::TextButton::buttonColourId, toy::red);
+    recBtn.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+    recBtn.onClick = [this]
+    {
+        if (proc.isRecording())
+        {
+            proc.stopRecording();
+            dragChip.set (proc.recordedSequence(), proc.recordedBars(), proc.tempoNow(), "REC");
+            lcd.flash ("RECORDED " + juce::String (proc.recordedBars()) + " BARS", "DRAG THE CLIP INTO LIVE");
+        }
+        else
+        {
+            if (proc.apvts.getRawParameterValue ("play")->load() < 0.5f) setParam ("play", 1.0f);
+            proc.startRecording();
+            lcd.flash ("RECORD ARMED", "STARTS ON THE NEXT BAR");
+        }
+    };
+    printBtn.onClick = [this]
+    {
+        dragChip.set (proc.printBars (printBars), printBars, proc.apvts.getRawParameterValue ("tempo")->load(), "PRINT");
+        lcd.flash ("PRINTED " + juce::String (printBars) + " BARS", "DRAG THE CLIP INTO LIVE");
+    };
+    printBarsBtn.onClick = [this] { printBars = printBars >= 32 ? 4 : printBars * 2; };
+    saveBtn.onClick = [this]
+    {
+        if (! dragChip.hasClip()) { lcd.flash ("NOTHING TO SAVE", "PRINT OR REC FIRST"); return; }
+        auto chooser = std::make_shared<juce::FileChooser> ("Save MIDI clip", juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Shuffle Buddy groove.mid"), "*.mid");
+        chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting,
+                              [this, chooser] (const juce::FileChooser& fc)
+        {
+            auto f = fc.getResult();
+            if (f == juce::File()) return;
+            if (! f.hasFileExtension ("mid")) f = f.withFileExtension ("mid");
+            if (ShuffleBuddyProcessor::writeMidiFile (dragChip.seq, dragChip.tempo, f)) lcd.flash ("SAVED", f.getFileName().toUpperCase());
+        });
+    };
+    midiOutBtn.onClick = [this] { setParam ("midiout", proc.apvts.getRawParameterValue ("midiout")->load() > 0.5f ? 0.0f : 1.0f); };
+    dragChip.setTooltip ("Drag onto a MIDI track in Live: notes land on the Drum Rack pads (C1 kick, D1 snare...)");
+    addAndMakeVisible (dragChip);
+    grid.onInfo = [this] (const juce::String& a, const juce::String& b) { lcd.flash (a, b); };
+
     // sounds: SOUND menu for the selected pad, KICK LAB, KITS
     setupBtn (soundBtn, juce::Colours::white, toy::ink, "Pick this pad's synth sound (or kick preset)");
     soundBtn.setName ("slot");
@@ -1063,7 +1308,7 @@ ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
     hint.setFont (toy::fontMed (13.0f));
     hint.setColour (juce::Label::textColourId, toy::brown);
     hint.setJustificationType (juce::Justification::centred);
-    hint.setText ("KEYS 1-8 PLAY PADS  /  SPACE PLAY-STOP  /  T THROW  /  K KICK LAB  /  CTRL+Z UNDO  /  SHIFT-CLICK A SLOT TO COPY INTO IT  /  DRAG WAVS ONTO PADS  /  RIGHT-CLICK A KNOB TO MIDI LEARN", juce::dontSendNotification);
+    hint.setText ("KEYS 1-0 PLAY PADS  /  SPACE PLAY-STOP  /  T THROW  /  K KICK LAB  /  CTRL+Z UNDO  /  SHIFT-CLICK A SLOT TO COPY INTO IT  /  DRAG WAVS ONTO PADS  /  RIGHT-CLICK A KNOB TO MIDI LEARN", juce::dontSendNotification);
     addAndMakeVisible (hint);
 
     selectPad (1);
@@ -1186,6 +1431,30 @@ void ShuffleBuddyEditor::timerCallback()
     chainBtn.setColour (juce::TextButton::buttonColourId, chain == 0 ? juce::Colours::white : toy::orange);
     chainBtn.setColour (juce::TextButton::textColourOffId, chain == 0 ? toy::ink : juce::Colours::white);
     undoBtn.setEnabled (proc.canUndo());
+    {
+        auto pv = [this] (const char* id) { return (int) proc.apvts.getRawParameterValue (id)->load(); };
+        static const char* lens[] = { "1 BEAT", "2 BEATS", "1 BAR" };
+        static const char* autos[] = { "AUTO OFF", "EVERY 4", "EVERY 8", "EVERY 16" };
+        fillTypeBtn.setButtonText (juce::String ("FILL: ") + groove::fillName (pv ("filltype")));
+        fillLenBtn.setButtonText (lens[juce::jlimit (0, 2, pv ("filllen"))]);
+        autoFillBtn.setButtonText (autos[juce::jlimit (0, 3, pv ("autofill"))]);
+        const bool crash = pv ("fillcrash") > 0;
+        crashBtn.setColour (juce::TextButton::buttonColourId, crash ? toy::orange : juce::Colours::white);
+        crashBtn.setColour (juce::TextButton::textColourOffId, crash ? juce::Colours::white : toy::ink);
+        autoFillBtn.setColour (juce::TextButton::buttonColourId, pv ("autofill") > 0 ? toy::orange : juce::Colours::white);
+        autoFillBtn.setColour (juce::TextButton::textColourOffId, pv ("autofill") > 0 ? juce::Colours::white : toy::ink);
+        printBarsBtn.setButtonText (juce::String (printBars) + " BARS");
+        const bool mo = pv ("midiout") > 0;
+        midiOutBtn.setButtonText (mo ? "MIDI OUT: ON" : "MIDI OUT: OFF");
+        midiOutBtn.setColour (juce::TextButton::buttonColourId, mo ? toy::green : juce::Colours::white);
+        midiOutBtn.setColour (juce::TextButton::textColourOffId, mo ? juce::Colours::white : toy::ink);
+        proc.pollRecording();
+        const bool recNow = proc.isRecording();
+        const bool blink = (juce::Time::getMillisecondCounter() / 300) % 2 == 0;
+        recBtn.setButtonText (recNow ? (proc.recordWaiting() ? "WAIT.." : "STOP " + juce::String (proc.recordedBars())) : "REC");
+        recBtn.setColour (juce::TextButton::buttonColourId, recNow ? (blink ? toy::red : toy::red.darker (0.4f)) : toy::red);
+        wasRecording = recNow;
+    }
 
     const int et = (int) proc.apvts.getRawParameterValue ("echotime")->load();
     const int ty = (int) proc.apvts.getRawParameterValue ("echotype")->load();
@@ -1332,7 +1601,7 @@ void ShuffleBuddyEditor::learnMenu (const juce::String& paramId, juce::Component
 bool ShuffleBuddyEditor::keyPressed (const juce::KeyPress& key)
 {
     const auto c = key.getTextCharacter();
-    if (c >= '1' && c <= '8') { proc.auditionPad (c - '1', 0.9f); selectPad (c - '1'); return true; }
+    if ((c >= '1' && c <= '9') || c == '0') { const int pd = c == '0' ? 9 : c - '1'; proc.auditionPad (pd, 0.9f); selectPad (pd); return true; }
     if ((key.getModifiers().isCommandDown() || key.getModifiers().isCtrlDown()) && (c == 'z' || c == 'Z' || key.getKeyCode() == 'Z')) { doUndo(); return true; }
     if (c == 'k' || c == 'K') { showLab (lab == nullptr || ! lab->isVisible()); return true; }
     if (c == 't' || c == 'T') { setParam ("throw", 1.0f); juce::Timer::callAfterDelay (700, [this] { setParam ("throw", 0.0f); }); return true; }
@@ -1393,14 +1662,24 @@ void ShuffleBuddyEditor::resized()
     }
     if (lab != nullptr) lab->setBounds (432, 136, 768, 474);
 
-    for (int i = 0; i < 4; ++i) styleBtns[i].setBounds (60 + (i % 2) * 181, 418 + (i / 2) * 60, 169, 54);
-    rollBtn.setBounds (60, 540, 170, 70);
-    varyBtn.setBounds (236, 540, 84, 70);
-    fillBtn.setBounds (326, 540, 84, 70);
+    for (int i = 0; i < 4; ++i) styleBtns[i].setBounds (60 + (i % 2) * 181, 416 + (i / 2) * 46, 169, 42);
+    fillTypeBtn.setBounds (60, 510, 124, 32);
+    fillLenBtn.setBounds (188, 510, 76, 32);
+    autoFillBtn.setBounds (268, 510, 78, 32);
+    crashBtn.setBounds (350, 510, 60, 32);
+    rollBtn.setBounds (60, 548, 170, 62);
+    varyBtn.setBounds (236, 548, 84, 62);
+    fillBtn.setBounds (326, 548, 84, 62);
+    recBtn.setBounds (60, 750, 84, 40);
+    printBtn.setBounds (150, 750, 92, 40);
+    printBarsBtn.setBounds (246, 750, 74, 40);
+    dragChip.setBounds (326, 748, 470, 44);
+    saveBtn.setBounds (802, 750, 108, 40);
+    midiOutBtn.setBounds (916, 750, 112, 40);
 
     grid.setBounds (432, 136, 768, 474);
 
-    for (int i = 0; i < NumPads; ++i) pads[(size_t) i]->setBounds (60 + i * 62, 636, 54, 104);
+    for (int i = 0; i < NumPads; ++i) pads[(size_t) i]->setBounds (60 + i * 50, 636, 44, 104);
     for (size_t i = 0; i < 6 && i < knobs.size(); ++i)
     {
         knobs[i].name->setBounds (568 + (int) i * 76, 630, 70, 16);

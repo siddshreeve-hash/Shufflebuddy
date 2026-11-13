@@ -66,23 +66,34 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShuffleBuddyProcessor::creat
         add (new APF ({ "kreal", 1 }, "Kick Real Layer", NR (0.0f, 1.0f), 0.2f, fmt (pct)));
         add (new APF ({ "kroom", 1 }, "Kick Room Mic", NR (0.0f, 1.0f), 0.35f, fmt (pct)));
     }
+    // ---- FILLS + MIDI
+    add (new juce::AudioParameterChoice ({ "filltype", 1 }, "Fill Type", juce::StringArray { "Auto", "Toms", "Snare Roll", "Kick Doubles", "Hat Lift", "Drop-out" }, 0));
+    add (new juce::AudioParameterChoice ({ "filllen", 1 }, "Fill Length", juce::StringArray { "1 Beat", "2 Beats", "1 Bar" }, 1));
+    add (new juce::AudioParameterChoice ({ "autofill", 1 }, "Auto Fill", juce::StringArray { "Off", "Every 4", "Every 8", "Every 16" }, 0));
+    add (new juce::AudioParameterBool ({ "fillcrash", 1 }, "Crash After Fill", true));
+    add (new juce::AudioParameterBool ({ "midiout", 1 }, "MIDI Out", true));
     juce::StringArray soundNames;
     for (auto& snd : sounds::library()) soundNames.add (snd.name);
-    static const char* padDefault[NumPads] = { "", "Garage Snare", "808 Clap", "808 Rim", "808 Hat", "Garage Open Hat", "Perc Thud", "Shaker" };
+    static const char* padDefault[NumPads] = { "", "Garage Snare", "808 Clap", "808 Rim", "808 Hat", "Garage Open Hat", "Perc Thud", "Shaker", "808 Tom Low", "Crash" };
+    static const int noteDefault[NumPads] = { 36, 38, 39, 37, 42, 46, 47, 44, 45, 49 };   // Ableton Drum Rack layout (toms: 41/45/48/50 by pitch)
     for (int i = 0; i < NumPads; ++i)
     {
         const juce::String n = juce::String (padName (i)).toLowerCase();
         if (i > 0) add (new juce::AudioParameterChoice ({ pid ("snd", i), 1 }, n + " sound", soundNames, sounds::find (padDefault[i])));
         add (new juce::AudioParameterBool ({ pid ("layer", i), 1 }, n + " layer WAV + synth", false));
         add (new APF ({ pid ("real", i), 1 }, n + " real layer", NR (0.0f, 2.0f), 1.0f, fmt (pct)));
+        add (new juce::AudioParameterBool ({ pid ("mute", i), 1 }, n + " mute", false));
+        add (new juce::AudioParameterBool ({ pid ("solo", i), 1 }, n + " solo", false));
+        add (new APF ({ pid ("lswing", i), 1 }, n + " swing", NR (0.0f, 1.5f, 0.05f), 1.0f, fmt (pct)));
+        add (new juce::AudioParameterInt ({ pid ("note", i), 1 }, n + " MIDI note", 0, 127, noteDefault[i]));
         add (new APF ({ pid ("room", i), 1 }, n + " room", NR (0.0f, 2.0f), 1.0f, fmt (pct)));
         add (new APF ({ pid ("lvl", i), 1 }, n + " level", NR (0.0f, 1.0f), 0.8f, fmt (pct)));
         add (new APF ({ pid ("tune", i), 1 }, n + " tune", NR (-12.0f, 12.0f, 0.1f), 0.0f, fmt ([] (float x) { return (x > 0 ? "+" : "") + juce::String (x, 1); })));
         add (new APF ({ pid ("decay", i), 1 }, n + " decay", NR (0.0f, 1.0f), 0.45f, fmt (pct)));
         add (new APF ({ pid ("push", i), 1 }, n + " push", NR (-20.0f, 30.0f, 0.5f), 0.0f,
                       fmt ([] (float x) { return (x > 0 ? "+" : "") + juce::String (juce::roundToInt (x)) + "ms"; })));
-        static const float eDef[NumPads] = { 0.0f, 0.12f, 0.12f, 0.4f, 0.05f, 0.1f, 0.35f, 0.0f };
-        static const float sDef[NumPads] = { 0.0f, 0.1f, 0.18f, 0.2f, 0.08f, 0.15f, 0.2f, 0.08f };
+        static const float eDef[NumPads] = { 0.0f, 0.12f, 0.12f, 0.4f, 0.05f, 0.1f, 0.35f, 0.0f, 0.15f, 0.0f };
+        static const float sDef[NumPads] = { 0.0f, 0.1f, 0.18f, 0.2f, 0.08f, 0.15f, 0.2f, 0.08f, 0.2f, 0.25f };
         add (new APF ({ pid ("esend", i), 1 }, n + " echo send", NR (0.0f, 1.0f), eDef[i], fmt (pct)));
         add (new APF ({ pid ("ssend", i), 1 }, n + " space send", NR (0.0f, 1.0f), sDef[i], fmt (pct)));
     }
@@ -112,23 +123,28 @@ ShuffleBuddyProcessor::ShuffleBuddyProcessor()
         padSnd[(size_t) i]   = i > 0 ? apvts.getRawParameterValue (pid ("snd", i)) : nullptr;
         padReal[(size_t) i]  = apvts.getRawParameterValue (pid ("real", i));
         padRoom[(size_t) i]  = apvts.getRawParameterValue (pid ("room", i));
+        padMute[(size_t) i]  = apvts.getRawParameterValue (pid ("mute", i));
+        padSolo[(size_t) i]  = apvts.getRawParameterValue (pid ("solo", i));
+        padSwing[(size_t) i] = apvts.getRawParameterValue (pid ("lswing", i));
+        padNote[(size_t) i]  = apvts.getRawParameterValue (pid ("note", i));
     }
     for (auto& c : ccMap) c.store (-1);
     for (auto& r : played) for (auto& c : r) c.store (0);
+    engineSeed = (juce::uint32) juce::Random::getSystemRandom().nextInt();
     for (auto& r : playedSrc) for (auto& c : r) c.store (0);
     // starter patterns: one per style, so it grooves the moment you press play
     juce::Random seed (2026);
     for (int s = 0; s < groove::numSlots; ++s) setGrid (s, groove::roll (s, seed));
     // pattern A: a hand-written 2-step to start from (the one on the mockup)
-    const groove::Grid a = {{
-        { 3,0,0,0, 0,0,0,0, 0,0,2,0, 0,0,0,0 },   // kick: 1 and the skip before 3
-        { 0,0,0,0, 3,0,0,1, 0,0,0,0, 3,0,1,0 },   // snare
-        { 0,0,0,0, 2,0,0,0, 0,0,0,0, 2,0,0,0 },   // clap
-        { 0,0,1,0, 0,0,2,0, 0,1,0,0, 0,0,2,0 },   // rim
-        { 2,1,0,1, 2,1,0,1, 2,1,0,1, 2,1,0,1 },   // hat
-        { 0,0,2,0, 0,0,2,0, 0,0,2,0, 0,0,2,0 },   // open hat on the off-beats
-        { 0,0,0,2, 0,0,0,0, 0,0,0,2, 0,1,0,0 },   // perc
-        { 1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1 } }}; // shaker
+    const groove::Grid a = groove::fromLevels ({
+        "3.........2.....",    // kick: 1 and the skip before 3
+        "....3..1....3.1.",    // snare
+        "....2.......2...",    // clap
+        "..1....2..1...2.",    // rim
+        "21.121.121.121.1",    // hat
+        "..2...2...2...2.",    // open hat on the off-beats
+        "...2.......2.1..",    // perc
+        "1111111111111111" }); // shaker
     setGrid (0, a);
     applyStyleFeel (0);
     startTimer (1000);
@@ -151,13 +167,13 @@ void ShuffleBuddyProcessor::buildSlots()
 groove::Grid ShuffleBuddyProcessor::grid (int slot) const
 {
     groove::Grid g {};
-    for (int pd = 0; pd < NumPads; ++pd) for (int s = 0; s < groove::numSteps; ++s) g[(size_t) pd][(size_t) s] = cell (slot, pd, s);
+    for (int pd = 0; pd < NumPads; ++pd) for (int s = 0; s < groove::numSteps; ++s) g[(size_t) pd][(size_t) s] = cellData (slot, pd, s);
     return g;
 }
 
 void ShuffleBuddyProcessor::setGrid (int slot, const groove::Grid& g)
 {
-    for (int pd = 0; pd < NumPads; ++pd) for (int s = 0; s < groove::numSteps; ++s) setCell (slot, pd, s, g[(size_t) pd][(size_t) s]);
+    for (int pd = 0; pd < NumPads; ++pd) for (int s = 0; s < groove::numSteps; ++s) setCellData (slot, pd, s, g[(size_t) pd][(size_t) s]);
 }
 
 void ShuffleBuddyProcessor::loadRealSets()
@@ -246,6 +262,7 @@ void ShuffleBuddyProcessor::applyKit (int index)
     for (size_t i = 0; i < kp.size(); ++i) if (juce::String (kp[i].name) == kit.kick) applyKickPreset ((int) i);
     for (int pd = 1; pd < NumPads; ++pd)
     {
+        if (kit.pads[pd - 1] == nullptr) continue;
         setParamValue (pid ("snd", pd), (float) sounds::find (kit.pads[pd - 1]));
         setParamValue (pid ("tune", pd), 0.0f);
         setParamValue (pid ("decay", pd), 0.45f);
@@ -380,7 +397,9 @@ bool ShuffleBuddyProcessor::isBusesLayoutSupported (const BusesLayout& l) const
 
 void ShuffleBuddyProcessor::prepareToPlay (double sampleRate, int)
 {
-    queued = 0; lastScheduled = -1; preparedBar = -1; stepPos = 0.0; wasPlaying = false;
+    queued = 0; stepPos = 0.0; wasPlaying = false; nNoteOffs = 0;
+    for (auto& pl : plans) pl.bar = -1;
+    outMidi.ensureSize (8192);
     for (auto& vc : voices) vc = DrumVoice();
     eBuf.setSize (2, maxChunk); sBuf.setSize (2, maxChunk); kBuf.setSize (2, maxChunk); rBuf.setSize (2, maxChunk); rumbleTail = 0;
     rumbleVerb.prepare (sampleRate);
@@ -397,8 +416,10 @@ void ShuffleBuddyProcessor::prepareToPlay (double sampleRate, int)
     compEnv = 0.0f; compGain = 1.0f; throwAmt = throwTail = 0.0f;
 }
 
-void ShuffleBuddyProcessor::trigger (int pad, float vel)
+void ShuffleBuddyProcessor::trigger (int pad, float vel, int alt)
 {
+    static const float tomSemis[4] = { -5.0f, 0.0f, 4.0f, 7.0f };   // floor, low, mid, high
+    const float altTune = pad == Toms ? tomSemis[juce::jlimit (0, 3, alt)] : 0.0f;
     if (pad == Hat) for (auto& vc : voices) if (vc.active() && vc.pad() == OpenHat) vc.choke();   // closed hat chokes open
     // voice stealing: free voice, else this pad's oldest, else the oldest overall
     DrumVoice* pick = nullptr;
@@ -421,7 +442,7 @@ void ShuffleBuddyProcessor::trigger (int pad, float vel)
     const Patch& patch = pad == Kick ? kickNow : sounds::library()[(size_t) juce::jlimit (0, (int) sounds::library().size() - 1, (int) padSnd[i]->load())].p;
     auto* smpl = liveSample[i].load();
     const RealSet* rs = realSet (patch.real);
-    pick->trigger (pad, vel, patch, padTune[i]->load(), padDecay[i]->load(), padLevel[i]->load(), smpl,
+    pick->trigger (pad, vel, patch, padTune[i]->load() + altTune, padDecay[i]->load(), padLevel[i]->load(), smpl,
                    (float) getSampleRate(), sampleClock, (juce::uint32) rng.nextInt(), padEcho[i]->load(), padSpace[i]->load(),
                    rs, padReal[i]->load(), padRoom[i]->load());
     if (smpl != nullptr && padLayer[i]->load() > 0.5f)   // LAYER: the synth plays underneath the WAV
@@ -429,7 +450,7 @@ void ShuffleBuddyProcessor::trigger (int pad, float vel)
         DrumVoice* second = nullptr;
         for (auto& vc : voices) if (! vc.active() && &vc != pick) { second = &vc; break; }
         if (second != nullptr)
-            second->trigger (pad, vel, patch, padTune[i]->load(), padDecay[i]->load(), padLevel[i]->load(), nullptr,
+            second->trigger (pad, vel, patch, padTune[i]->load() + altTune, padDecay[i]->load(), padLevel[i]->load(), nullptr,
                              (float) getSampleRate(), sampleClock, (juce::uint32) rng.nextInt(), padEcho[i]->load(), padSpace[i]->load(),
                              rs, padReal[i]->load(), padRoom[i]->load());
     }
@@ -437,98 +458,126 @@ void ShuffleBuddyProcessor::trigger (int pad, float vel)
     hitCount[i].fetch_add (1);
 }
 
-void ShuffleBuddyProcessor::markDiff (const groove::Grid& before, juce::uint8 source)
+int ShuffleBuddyProcessor::noteFor (int lane, int alt) const
+{
+    if (lane == Toms) { static const int tn[4] = { 41, 45, 48, 50 }; return tn[juce::jlimit (0, 3, alt)] + ((int) padNote[(size_t) Toms]->load() - 45); }
+    return juce::jlimit (0, 127, (int) padNote[(size_t) lane]->load());
+}
+
+groove::EngineIn ShuffleBuddyProcessor::engineIn() const
+{
+    groove::EngineIn in;
+    in.swing = (p ("swing") - 50.0f) / 50.0f;
+    in.ghosts = p ("ghosts"); in.loosen = p ("loosen"); in.variety = p ("variety");
+    in.style = (int) p ("style"); in.chain = (int) p ("chain"); in.slot = (int) p ("slot");
+    static const int lens[3] = { 4, 8, 16 }, autos[4] = { 0, 4, 8, 16 };
+    in.fillType = (int) p ("filltype"); in.fillLen = lens[juce::jlimit (0, 2, (int) p ("filllen"))];
+    in.autoFill = autos[juce::jlimit (0, 3, (int) p ("autofill"))]; in.crash = p ("fillcrash") > 0.5f;
+    bool anySolo = false;
+    for (int i = 0; i < NumPads; ++i) anySolo = anySolo || padSolo[(size_t) i]->load() > 0.5f;
+    for (int i = 0; i < NumPads; ++i)
+    {
+        in.laneSwing[(size_t) i] = padSwing[(size_t) i]->load();
+        in.push[(size_t) i] = padPush[(size_t) i]->load();
+        in.audible[(size_t) i] = anySolo ? padSolo[(size_t) i]->load() > 0.5f : padMute[(size_t) i]->load() < 0.5f;
+    }
+    in.seed = engineSeed;
+    return in;
+}
+
+void ShuffleBuddyProcessor::planBar (groove::BarPlan& plan, juce::int64 bar, bool fillNow, bool prevFilled, const groove::EngineIn& in)
+{
+    const int slot = groove::slotForBar (in, bar);
+    groove::Grid pat;
+    for (int pd = 0; pd < NumPads; ++pd) for (int s = 0; s < groove::numSteps; ++s) pat[(size_t) pd][(size_t) s] = cellData (slot, pd, s);
+    groove::makeBar (plan, bar, pat, in, fillNow, prevFilled);
+}
+
+groove::BarPlan* ShuffleBuddyProcessor::planFor (juce::int64 bar)
+{
+    for (auto& pl : plans) if (pl.bar == bar) return &pl;
+    return nullptr;
+}
+
+void ShuffleBuddyProcessor::publishBar (const groove::BarPlan& pl)
 {
     for (int pd = 0; pd < NumPads; ++pd)
         for (int s = 0; s < groove::numSteps; ++s)
         {
-            const auto a = before[(size_t) pd][(size_t) s], b = barGrid[(size_t) pd][(size_t) s];
-            if (a == b) continue;
-            srcTmp[(size_t) pd][(size_t) s] = b == 0 ? (juce::uint8) Dropped : source;
+            played[(size_t) pd][(size_t) s].store ((juce::uint8) groove::levelOfVel (pl.played[(size_t) pd][(size_t) s].vel));
+            playedSrc[(size_t) pd][(size_t) s].store (pl.src[(size_t) pd][(size_t) s]);
         }
+    playedSlotNow.store (pl.slot);
+    playSlotNow.store (pl.slot);
 }
 
-void ShuffleBuddyProcessor::publishBar()
+// ---------------------------------------------------------------- MIDI: record + print
+void ShuffleBuddyProcessor::pollRecording()
 {
-    for (int pd = 0; pd < NumPads; ++pd)
-        for (int s = 0; s < groove::numSteps; ++s)
+    if (! recording) return;
+    const double ticksPer16 = 240.0;   // 960 PPQ
+    recFifo.read (recFifo.getNumReady()).forEach ([this, ticksPer16] (int i)
+    {
+        const auto& h = recBuf[(size_t) i];
+        const double t = juce::jmax (0.0, h.pos16 * ticksPer16);
+        recSeq.addEvent (juce::MidiMessage::noteOn (1, h.note, juce::jlimit (0.01f, 1.0f, h.vel)), t);
+        recSeq.addEvent (juce::MidiMessage::noteOff (1, h.note), t + 110.0);
+        recLastPos = juce::jmax (recLastPos, h.pos16);
+    });
+    recBars = (int) std::ceil ((recLastPos + 0.5) / 16.0);
+}
+
+void ShuffleBuddyProcessor::stopRecording()
+{
+    recArmed.store (false);
+    pollRecording();
+    recording = false;
+    recSeq.sort();
+    recSeq.updateMatchedPairs();
+    recBars = juce::jmax (recBars, 1);
+}
+
+juce::MidiMessageSequence ShuffleBuddyProcessor::printBars (int bars)
+{
+    // render N bars offline with the same engine (new dice each print): ghosts, variety, chance, fills, swing all baked in
+    juce::MidiMessageSequence seq;
+    auto in = engineIn();
+    in.seed = (juce::uint32) uiRng.nextInt();
+    auto plan = std::make_unique<groove::BarPlan>();
+    const double bpm = p ("tempo"), ticksPer16 = 240.0, ticksPerMs = 960.0 * bpm / 60000.0;
+    bool prevFilled = false;
+    for (int b = 0; b < bars; ++b)
+    {
+        planBar (*plan, b, false, prevFilled, in);
+        prevFilled = plan->filled;
+        for (int h = 0; h < plan->nHits; ++h)
         {
-            played[(size_t) pd][(size_t) s].store (barGrid[(size_t) pd][(size_t) s]);
-            playedSrc[(size_t) pd][(size_t) s].store (srcTmp[(size_t) pd][(size_t) s]);
+            const auto& hit = plan->hits[(size_t) h];
+            const double t = juce::jmax (0.0, ((double) b * 16.0 + hit.pos) * ticksPer16 + hit.ms * ticksPerMs);
+            const int note = noteFor (hit.lane, hit.alt);
+            seq.addEvent (juce::MidiMessage::noteOn (1, note, juce::jlimit (0.01f, 1.0f, hit.vel)), t);
+            seq.addEvent (juce::MidiMessage::noteOff (1, note), t + 110.0);
         }
-    playedSlotNow.store (activeSlot);
+    }
+    seq.sort();
+    seq.updateMatchedPairs();
+    return seq;
 }
 
-void ShuffleBuddyProcessor::prepareBar (juce::int64 bar)
+bool ShuffleBuddyProcessor::writeMidiFile (const juce::MidiMessageSequence& notes, double bpm, const juce::File& f)
 {
-    // this bar's playing copy: stored pattern + per-bar variety + auto ghosts + fill (each change is tagged for the grid)
-    barGrid = grid (activeSlot);
-    for (auto& r : srcTmp) r.fill (FromPattern);
-    const float variety = p ("variety"), ghosts = p ("ghosts");
-    const int style = (int) p ("style");
-    if (variety > 0.0f && bar > 0)
-    {
-        const auto before = barGrid;
-        const int moves = (int) std::floor (variety * 4.0f + rng.nextFloat());
-        groove::vary (barGrid, style, rng, moves);
-        if (variety > 0.4f && (bar % 4) == 3 && rng.nextFloat() < variety)   // end of a 4-bar phrase: little lift
-            for (int s = 12; s < 16; ++s) if (barGrid[Snare][(size_t) s] == 0 && rng.nextFloat() < 0.5f) barGrid[Snare][(size_t) s] = 1;
-        markDiff (before, FromVariety);
-    }
-    if (ghosts > 0.25f)   // auto ghosts: quiet snare/hat notes in the gaps, on the off 16ths
-    {
-        const auto before = barGrid;
-        for (int s = 1; s < 16; s += 2)
-        {
-            if (barGrid[Snare][(size_t) s] == 0 && rng.nextFloat() < (ghosts - 0.25f) * 0.4f) barGrid[Snare][(size_t) s] = 1;
-            if (barGrid[Hat][(size_t) s] == 0 && barGrid[OpenHat][(size_t) s] == 0 && rng.nextFloat() < (ghosts - 0.25f) * 0.6f) barGrid[Hat][(size_t) s] = 1;
-        }
-        markDiff (before, FromGhosts);
-    }
-    if (p ("fill") > 0.5f) { const auto before = barGrid; groove::fill (barGrid, rng); markDiff (before, FromFill); }
-    publishBar();
-}
-
-void ShuffleBuddyProcessor::scheduleStep (juce::int64 step, juce::int64 at, double sps)
-{
-    const int s = (int) (step & 15);
-    const juce::int64 bar = step >> 4;
-    if (s == 0 || bar != preparedBar)
-    {
-        const int chain = (int) p ("chain");   // pattern changes land on the next bar
-        activeSlot = chain == 1 ? (int) (bar & 1) : chain == 2 ? (int) (bar & 3) : chain == 3 ? ((bar & 3) == 3 ? 1 : 0) : (int) p ("slot");
-        playSlotNow.store (activeSlot);
-        prepareBar (bar);
-        preparedBar = bar;
-        fillApplied = p ("fill") > 0.5f;
-    }
-    else if (s == 8 && ! fillApplied && p ("fill") > 0.5f)   // FILL pressed during the bar: fill its second half
-    {
-        const auto before = barGrid;
-        groove::fill (barGrid, rng);
-        markDiff (before, FromFill);
-        publishBar();
-        fillApplied = true;
-    }
-    const float sr = (float) getSampleRate();
-    const float swing = (p ("swing") - 50.0f) / 50.0f;   // 0 .. 0.5 of a 16th
-    const float ghostVel = 0.12f + 0.42f * p ("ghosts");
-    const float loosen = p ("loosen");
-    for (int pd = 0; pd < NumPads; ++pd)
-    {
-        const int lvl = barGrid[(size_t) pd][(size_t) s];
-        if (lvl == 0) continue;
-        float vel = lvl == 3 ? 1.0f : lvl == 2 ? 0.72f : ghostVel;
-        // loosen: human timing + velocity wobble (gaussian-ish: average of two uniforms)
-        const float g1 = rng.nextFloat() + rng.nextFloat() - 1.0f, g2 = rng.nextFloat() + rng.nextFloat() - 1.0f;
-        vel = juce::jlimit (0.05f, 1.0f, vel * (1.0f + g1 * 0.35f * loosen));
-        double t = (double) at;
-        if (s & 1) t += swing * sps;
-        t += padPush[(size_t) pd]->load() * 0.001 * sr;
-        t += g2 * loosen * 0.014 * sr;
-        if (queued < (int) queue.size())
-            queue[(size_t) queued++] = { juce::jmax (sampleClock, (juce::int64) std::llround (t)), pd, vel };
-    }
+    juce::MidiMessageSequence track;
+    track.addEvent (juce::MidiMessage::textMetaEvent (3, "Shuffle Buddy"), 0);
+    track.addEvent (juce::MidiMessage::tempoMetaEvent ((int) std::round (60000000.0 / bpm)), 0);
+    track.addEvent (juce::MidiMessage::timeSignatureMetaEvent (4, 4), 0);
+    track.addSequence (notes, 0.0);
+    track.updateMatchedPairs();
+    juce::MidiFile mf;
+    mf.setTicksPerQuarterNote (960);
+    mf.addTrack (track);
+    f.deleteFile();
+    juce::FileOutputStream os (f);
+    return os.openedOk() && mf.writeTo (os);
 }
 
 void ShuffleBuddyProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -558,16 +607,19 @@ void ShuffleBuddyProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
             continue;
         }
         if (! m.isNoteOn()) continue;
-        static const int gm[NumPads] = { 36, 38, 39, 37, 42, 46, 47, 70 };
-        int pd = -1;
-        for (int i = 0; i < NumPads; ++i) if (m.getNoteNumber() == gm[i]) pd = i;
-        if (pd < 0 && m.getNoteNumber() >= 48 && m.getNoteNumber() < 56) pd = m.getNoteNumber() - 48;
-        if (pd >= 0 && queued < (int) queue.size()) queue[(size_t) queued++] = { sampleClock + meta.samplePosition, pd, m.getFloatVelocity() };
+        int pd = -1, alt = 1;
+        for (int i = 0; i < NumPads && pd < 0; ++i)
+        {
+            if (i == Toms) { for (int a = 0; a < 4; ++a) if (noteFor (Toms, a) == m.getNoteNumber()) { pd = Toms; alt = a; } }
+            else if (noteFor (i, 0) == m.getNoteNumber()) pd = i;
+        }
+        if (pd < 0 && m.getNoteNumber() >= 60 && m.getNoteNumber() < 60 + NumPads) pd = m.getNoteNumber() - 60;   // C3 upwards: pads in order
+        if (pd >= 0 && queued < (int) queue.size()) queue[(size_t) queued++] = { sampleClock + meta.samplePosition, pd, m.getFloatVelocity(), alt, false };
     }
     for (int i = 0; i < NumPads; ++i)
     {
         const float a = pendingAudition[(size_t) i].exchange (-1.0f);
-        if (a >= 0.0f && queued < (int) queue.size()) queue[(size_t) queued++] = { sampleClock, i, a };
+        if (a >= 0.0f && queued < (int) queue.size()) queue[(size_t) queued++] = { sampleClock, i, a, 1, false };
     }
 
     // transport: host tempo/position when rolling, else the TEMPO control
@@ -582,8 +634,14 @@ void ShuffleBuddyProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
 
     auto* L = buffer.getWritePointer (0);
     auto* R = buffer.getWritePointer (1);
+    outMidi.clear();
     for (int start = 0; start < n; start += maxChunk)   // fixed-size chunks: nothing allocates, whatever the host block size
+    {
+        chunkBase = start;
         runChunk (L + start, R + start, juce::jmin (maxChunk, n - start));
+    }
+    midi.swapWith (outMidi);   // the plugin's MIDI output: every note it plays, ready to record in the DAW
+    outMidi.ensureSize (8192);
     outLvl.store (buffer.getRMSLevel (0, 0, n));
 }
 
@@ -592,35 +650,89 @@ void ShuffleBuddyProcessor::runChunk (float* L, float* R, int n)
     const double sr = getSampleRate();
     sps = sr * 60.0 / bpmNow / 4.0;
     const bool play = p ("play") > 0.5f || hostRolling;
+    auto resetPlans = [this] { for (auto& pl : plans) pl.bar = -1; emittedUpTo = { -1.0e9, -1.0e9 }; publishedBar = -1; };
     if (play && ! wasPlaying)
     {
         stepPos = hostRolling ? hostPpq * 4.0 : -1.0e-6;
-        lastScheduled = (juce::int64) std::ceil (stepPos - 1.0e-9) - 1;
-        preparedBar = -1;
+        resetPlans();
     }
     if (hostRolling && std::abs (hostPpq * 4.0 - stepPos) > 0.5)   // host jumped (loop / relocate)
     {
         stepPos = hostPpq * 4.0;
-        lastScheduled = (juce::int64) std::ceil (stepPos - 1.0e-9) - 1;
-        preparedBar = -1;
+        resetPlans();
     }
     wasPlaying = play;
 
     if (play)
     {
-        // look ahead 40 ms so drums pushed EARLY can still land before their step
+        // look ahead 40 ms (+2 steps of planning) so hits pushed or nudged EARLY still land before their step
         const double look = 0.04 * sr;
-        for (juce::int64 k = lastScheduled + 1; (double) (k - stepPos) * sps < (double) n + look; ++k)
+        const double w0 = stepPos, w1 = stepPos + ((double) n + look) / sps;
+        const auto in = engineIn();
+        const double msTo16 = sr * 0.001 / sps;
+        const bool fillOn = p ("fill") > 0.5f;
+        const juce::int64 curBar = (juce::int64) std::floor (juce::jmax (0.0, w0) / 16.0);
+        // FILL pressed during a bar: re-plan it with the fill (same dice, so what already played stays the same)
+        if (fillOn && ! fillWasOn)
+            if (auto* pl = planFor (curBar))
+                if (! pl->filled)
+                {
+                    const auto* prev = planFor (curBar - 1);
+                    planBar (*pl, curBar, true, prev != nullptr && prev->filled, in);
+                    publishedBar = -1;
+                }
+        fillWasOn = fillOn;
+        for (juce::int64 b = curBar; (double) b * 16.0 - 2.0 < w1; ++b)
         {
-            scheduleStep (k, sampleClock + (juce::int64) std::llround ((k - stepPos) * sps), sps);
-            lastScheduled = k;
+            auto* pl = planFor (b);
+            if (pl == nullptr)
+            {
+                int idx = plans[0].bar < plans[1].bar ? 0 : 1;   // reuse the older plan slot
+                if (plans[(size_t) idx].bar == curBar) idx = 1 - idx;
+                pl = &plans[(size_t) idx];
+                const auto* prev = planFor (b - 1);
+                planBar (*pl, b, fillOn, prev != nullptr && prev->filled, in);
+                emittedUpTo[(size_t) idx] = -1.0e9;
+            }
+            const int idx = (int) (pl - plans.data());
+            const bool rec = recArmed.load();
+            if (rec && recStartBar.load() < 0 && b > curBar - 1 && (double) b * 16.0 >= w0) recStartBar.store (b);
+            for (int h = 0; h < pl->nHits; ++h)
+            {
+                const auto& hit = pl->hits[(size_t) h];
+                const double abs16 = (double) b * 16.0 + hit.pos + hit.ms * msTo16;
+                if (abs16 <= emittedUpTo[(size_t) idx] || abs16 > w1) continue;
+                const auto t = juce::jmax (sampleClock, sampleClock + (juce::int64) std::llround ((abs16 - w0) * sps));
+                if (queued < (int) queue.size()) queue[(size_t) queued++] = { t, hit.lane, hit.vel, hit.alt, true };
+                const auto rs = recStartBar.load();
+                if (rec && rs >= 0 && abs16 >= (double) rs * 16.0 - 1.0)
+                {
+                    int s1, n1, s2, n2;
+                    recFifo.prepareToWrite (1, s1, n1, s2, n2);
+                    if (n1 > 0) { recBuf[(size_t) s1] = { abs16 - (double) rs * 16.0, noteFor (hit.lane, hit.alt), hit.vel }; recFifo.finishedWrite (1); }
+                }
+            }
+            emittedUpTo[(size_t) idx] = juce::jmax (emittedUpTo[(size_t) idx], w1);
         }
+        // show the bar that's actually sounding now
+        if (curBar != publishedBar) if (auto* pl = planFor (curBar)) { publishBar (*pl); publishedBar = curBar; }
         stepNow.store ((int) (((juce::int64) std::floor (stepPos)) & 15));
         barNow.store ((int) (((juce::int64) std::floor (stepPos)) >> 4) & 3);
         stepPos += (double) n / sps;
         if (hostRolling) hostPpq += (double) n / sps / 4.0;
     }
 
+    const bool midiOutOn = p ("midiout") > 0.5f;
+    {   // note-offs that fall inside this chunk
+        int keep = 0;
+        for (int i = 0; i < nNoteOffs; ++i)
+        {
+            const auto& o = noteOffs[(size_t) i];
+            if (o.t < sampleClock + n) outMidi.addEvent (juce::MidiMessage::noteOff (1, o.note), chunkBase + (int) juce::jmax ((juce::int64) 0, o.t - sampleClock));
+            else noteOffs[(size_t) keep++] = o;
+        }
+        nNoteOffs = keep;
+    }
     // ---- voices: dry + echo send + space send, each hit starting on its exact sample
     eBuf.clear(); sBuf.clear(); kBuf.clear();
     auto* KL = kBuf.getWritePointer (0); auto* KR = kBuf.getWritePointer (1);
@@ -643,7 +755,16 @@ void ShuffleBuddyProcessor::runChunk (float* L, float* R, int n)
         for (int i = 0; i < queued; ++i)
         {
             const auto e = queue[(size_t) i];
-            if (e.t <= nowAbs) { const auto saved = sampleClock; sampleClock = nowAbs; trigger (e.pad, e.vel); sampleClock = saved; }
+            if (e.t <= nowAbs)
+            {
+                const auto saved = sampleClock; sampleClock = nowAbs; trigger (e.pad, e.vel, e.alt); sampleClock = saved;
+                if (e.seq && midiOutOn)
+                {
+                    const int note = noteFor (e.pad, e.alt);
+                    outMidi.addEvent (juce::MidiMessage::noteOn (1, note, juce::jlimit (0.01f, 1.0f, e.vel)), chunkBase + done);
+                    if (nNoteOffs < (int) noteOffs.size()) noteOffs[(size_t) nNoteOffs++] = { nowAbs + (juce::int64) (0.06 * getSampleRate()), note };
+                }
+            }
             else queue[(size_t) keep++] = e;
         }
         queued = keep;
@@ -776,12 +897,14 @@ void ShuffleBuddyProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     auto state = apvts.copyState();
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
-    auto* pat = xml->createNewChildElement ("PATTERNS");
-    for (int s = 0; s < groove::numSlots; ++s)
+    auto* pat = xml->createNewChildElement ("PATTERNS2");   // per step: velocity, chance, nudge, ratchet, tom pitch (hex)
+    for (int sl = 0; sl < groove::numSlots; ++sl)
     {
         juce::String str;
-        for (int pd = 0; pd < NumPads; ++pd) for (int st = 0; st < groove::numSteps; ++st) str << (int) cell (s, pd, st);
-        pat->setAttribute ("s" + juce::String (s), str);
+        for (int pd = 0; pd < NumPads; ++pd)
+            for (int st = 0; st < groove::numSteps; ++st)
+                str << juce::String::toHexString ((juce::int64) groove::pack (cellData (sl, pd, st))).paddedLeft ('0', 10);
+        pat->setAttribute ("s" + juce::String (sl), str);
     }
     auto* map = xml->createNewChildElement ("MIDIMAP");
     for (int cc = 0; cc < 128; ++cc)
@@ -801,12 +924,23 @@ void ShuffleBuddyProcessor::setStateInformation (const void* data, int size)
 {
     auto xml = getXmlFromBinary (data, size);
     if (xml == nullptr || ! xml->hasTagName (apvts.state.getType())) return;
+    if (auto* pat = xml->getChildByName ("PATTERNS2"))
+    {
+        for (int sl = 0; sl < groove::numSlots; ++sl)
+        {
+            const auto str = pat->getStringAttribute ("s" + juce::String (sl));
+            if (str.length() == NumPads * groove::numSteps * 10)
+                for (int i = 0; i < NumPads * groove::numSteps; ++i)
+                    setCellData (sl, i / groove::numSteps, i % groove::numSteps, groove::unpack ((juce::uint64) str.substring (i * 10, i * 10 + 10).getHexValue64()));
+        }
+        xml->removeChildElement (pat, true);
+    }
     if (auto* pat = xml->getChildByName ("PATTERNS"))
     {
         for (int s = 0; s < groove::numSlots; ++s)
         {
             const auto str = pat->getStringAttribute ("s" + juce::String (s));
-            if (str.length() == NumPads * groove::numSteps)
+            if (str.length() == 8 * groove::numSteps)   // older 8-lane saves
                 for (int i = 0; i < str.length(); ++i) setCell (s, i / groove::numSteps, i % groove::numSteps, (juce::uint8) juce::jlimit (0, 3, (int) (str[i] - '0')));
         }
         xml->removeChildElement (pat, true);

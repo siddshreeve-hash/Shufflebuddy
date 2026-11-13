@@ -30,8 +30,8 @@ int main (int argc, char** argv)
         if (t[0] == "grid" && t.size() >= 10)
         {
             groove::Grid g {};
-            for (int p = 0; p < NumPads; ++p)
-                for (int s = 0; s < 16 && s < t[p + 2].length(); ++s) { const auto c = t[p + 2][s]; g[(size_t) p][(size_t) s] = (juce::uint8) (c >= '0' && c <= '3' ? c - '0' : 0); }
+            for (int p = 0; p < NumPads && p + 2 < t.size(); ++p)
+                for (int s = 0; s < 16 && s < t[p + 2].length(); ++s) { const auto c = t[p + 2][s]; if (c >= '1' && c <= '3') g[(size_t) p][(size_t) s] = groove::hit (groove::velOfLevel (c - '0')); }
             proc.setGrid (t[1].getIntValue(), g);
         }
         else if (t[0] == "kit") proc.applyKit (t[1].getIntValue());
@@ -59,7 +59,7 @@ int main (int argc, char** argv)
         const double bar = (pos + 0.25 * barLen / 16.0) / barLen;
         while (ci < tl.cmds.size() && tl.cmds[ci].bar <= bar) runCmd (tl.cmds[ci++].args);
         // pattern switches must be in before the sequencer prepares the next bar (it looks ahead), so they go in half a beat early
-        while (si < tl.sets.size() && tl.sets[si].bar <= bar + (tl.sets[si].id == "slot" ? 0.125 : 0.0)) { setP (tl.sets[si].id, tl.sets[si].v); ++si; }
+        while (si < tl.sets.size() && tl.sets[si].bar <= bar + (tl.sets[si].id == "slot" ? 0.25 : 0.0)) { setP (tl.sets[si].id, tl.sets[si].v); ++si; }
         for (auto& r : tl.ramps) if (bar >= r.b0 && bar <= r.b1) setP (r.id, r.v0 + (r.v1 - r.v0) * (float) ((bar - r.b0) / juce::jmax (1e-6, r.b1 - r.b0)));
         if (pos >= barLen * tl.bars) setP ("play", 0.0f);
         juce::MidiBuffer midi;

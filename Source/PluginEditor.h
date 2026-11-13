@@ -32,7 +32,7 @@ namespace toy
     const juce::Colour squashCol { 0xff22c7a9 };
     const juce::Colour deck      { 0xff283252 };
     const juce::Colour deckLo    { 0xff161c30 };
-    inline juce::Colour padColour (int p) { const juce::Colour c[] = { red, blue, purple, green, orange, pink, teal, olive }; return c[juce::jlimit (0, 7, p)]; }
+    inline juce::Colour padColour (int p) { const juce::Colour c[] = { red, blue, purple, green, orange, pink, teal, olive, juce::Colour (0xff8d5a3c), juce::Colour (0xffc9971a) }; return c[juce::jlimit (0, 9, p)]; }
 }
 
 class ToyLookAndFeel : public juce::LookAndFeel_V4
@@ -70,17 +70,44 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
     std::function<void (int)> onSelectPad;
+    std::function<void (const juce::String&, const juce::String&)> onInfo;
     int lastStep = -1;
+    enum Mode { Notes, Velocity, Chance, Nudge, Ratchet, NumModes };
+    int mode = Notes;
 private:
-    struct Hit { int pad = -1, step = -1; bool push = false; bool label = false; };
+    struct Hit { int pad = -1, step = -1; bool push = false, swing = false, label = false, mute = false, solo = false; int tab = -1; };
     Hit hitTest (juce::Point<int>) const;
     juce::Rectangle<float> cellRect (int pad, int step) const;
     juce::Rectangle<float> pushRect (int pad) const;
+    juce::Rectangle<float> swingRect (int pad) const;
     juce::Rectangle<float> labelRect (int pad) const;
+    juce::Rectangle<float> muteRect (int pad) const;
+    juce::Rectangle<float> soloRect (int pad) const;
+    juce::Rectangle<float> tabRect (int tab) const;
+    float lean() const;
+    void editValue (int pad, int step, const juce::MouseEvent&, bool first);
     ShuffleBuddyProcessor& proc;
-    int paintValue = -1, dragPushPad = -1;
-    float dragStartY = 0, dragStartPush = 0;
+    int paintValue = -1, dragPushPad = -1, dragSwingPad = -1, dragPad = -1, dragStep = -1;
+    float dragStartY = 0, dragStartX = 0, dragStartVal = 0;
     std::array<std::array<bool, 16>, NumPads> painted {};
+};
+
+// Drag this into Live (or any DAW) and it drops a MIDI clip of the recorded / printed groove
+class MidiDragChip : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    void set (const juce::MidiMessageSequence& s, int bars, double bpm, const juce::String& what) { seq = s; numBars = bars; tempo = bpm; label = what; repaint(); }
+    bool hasClip() const { return numBars > 0; }
+    juce::File writeTemp() const;
+    void paint (juce::Graphics&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseEnter (const juce::MouseEvent&) override { setMouseCursor (hasClip() ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor); }
+    juce::MidiMessageSequence seq;
+    int numBars = 0;
+    double tempo = 120.0;
+    juce::String label;
+private:
+    bool dragging = false;
 };
 
 class FxMeter : public juce::Component, public juce::SettableTooltipClient
@@ -181,6 +208,11 @@ private:
     juce::TextButton styleBtns[4], rollBtn { "ROLL" }, varyBtn { "VARY" }, fillBtn { "FILL" };
     juce::TextButton playBtn, stopBtn, slotBtns[4], tempoDown { "-" }, tempoUp { "+" };
     juce::TextButton undoBtn { "UNDO" }, chainBtn { "CHAIN" }, throwBtn { "THROW" };
+    juce::TextButton fillTypeBtn, fillLenBtn, autoFillBtn, crashBtn { "CRASH" };
+    juce::TextButton recBtn { "REC" }, printBtn { "PRINT" }, printBarsBtn, saveBtn { "SAVE .MID" }, midiOutBtn;
+    MidiDragChip dragChip;
+    int printBars = 16;
+    bool wasRecording = false;
     juce::TextButton timeBtns[4], typeBtns[3];
     FxMeter grMeter, echoLed;
     juce::TextButton soundBtn, labBtn { "KICK LAB" }, kitsBtn { "KITS" };

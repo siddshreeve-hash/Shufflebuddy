@@ -19,12 +19,7 @@ static juce::Button* findButton (juce::Component* c, const juce::String& textOrN
     for (auto* k : c->getChildren()) if (auto* r = findButton (k, textOrName)) return r;
     return nullptr;
 }
-static groove::Grid parseGrid (std::initializer_list<const char*> rows)
-{
-    groove::Grid g {}; int p = 0;
-    for (auto* r : rows) { for (int s = 0; s < 16 && r[s]; ++s) g[(size_t) p][(size_t) s] = (juce::uint8) (r[s] >= '0' && r[s] <= '3' ? r[s] - '0' : 0); ++p; }
-    return g;
-}
+static groove::Grid parseGrid (std::initializer_list<const char*> rows) { return groove::fromLevels (rows); }
 
 int main (int argc, char** argv)
 {

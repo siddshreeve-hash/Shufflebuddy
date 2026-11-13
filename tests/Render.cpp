@@ -14,7 +14,7 @@ int main (int argc, char** argv)
     int fillBar = -1;
     std::vector<std::pair<juce::String, juce::String>> kv;
     for (int i = 3; i < argc; ++i) { juce::String a (argv[i]); kv.push_back ({ a.upToFirstOccurrenceOf ("=", false, false), a.fromFirstOccurrenceOf ("=", false, false) }); }
-    int throwBar = -1, sweepBar = -1; double tailSec = 1.0;
+    int throwBar = -1, sweepBar = -1; double tailSec = 1.0; juce::String midiPath, recPath; int midiOutNotes = 0;
     for (auto& [k, v] : kv) if (k == "style") proc.applyStyleFeel (v.getIntValue());
     for (auto& [k, v] : kv)
     {
@@ -22,6 +22,9 @@ int main (int argc, char** argv)
         else if (k == "roll") { juce::Random r (v.getLargeIntValue()); proc.setGrid (proc.currentSlot(), groove::roll ((int) proc.apvts.getRawParameterValue ("style")->load(), r)); }
         else if (k == "straight") { set ("swing", 50); set ("loosen", 0); set ("ghosts", 0); set ("variety", 0); for (int p = 0; p < NumPads; ++p) set (ShuffleBuddyProcessor::pid ("push", p), 0); }
         else if (k == "fillbar") fillBar = v.getIntValue();
+        else if (k == "midi") { midiPath = v; }
+        else if (k == "rec") { recPath = v; }
+        else if (k == "cellx") { auto t = juce::StringArray::fromTokens (v, ",", ""); auto c = proc.cellData (0, t[0].getIntValue(), t[1].getIntValue()); c.ratchet = (juce::uint8) t[2].getIntValue(); c.nudge = (juce::int8) t[3].getIntValue(); c.prob = (juce::uint8) t[4].getIntValue(); proc.setCellData (0, t[0].getIntValue(), t[1].getIntValue(), c); }
         else if (k == "kick") proc.applyKickPreset (v.getIntValue());
         else if (k == "kit") proc.applyKit (v.getIntValue());
         else if (k == "surprise") { for (int q = 0; q < v.getIntValue(); ++q) proc.surpriseKick(); }
@@ -30,10 +33,11 @@ int main (int argc, char** argv)
         else if (k == "tail") tailSec = v.getDoubleValue();
         else if (k == "grid" && v.length() == NumPads * 16)
             for (int i = 0; i < v.length(); ++i) proc.setCell (proc.currentSlot(), i / 16, i % 16, (juce::uint8) (v[i] - '0'));
-        else if (k != "style" && k != "log" && k != "chainlog") set (k, v.getFloatValue());
+        else if (k != "style" && k != "log" && k != "chainlog" && k != "midi" && k != "rec" && k != "cellx") set (k, v.getFloatValue());
     }
     set ("play", 1);
     proc.prepareToPlay (sr, bs);
+    if (recPath.isNotEmpty()) proc.startRecording();
     const double bpm = proc.apvts.getRawParameterValue ("tempo")->load();
     const double barLen = sr * 60.0 / bpm * 4.0;
     const int total = (int) (barLen * bars + sr * tailSec);
@@ -48,6 +52,8 @@ int main (int argc, char** argv)
         else if (sweepBar >= 0) set ("fxfilter", 0.0f);
         if (pos >= barLen * bars) set ("play", 0);
         juce::MidiBuffer m; proc.processBlock (blk, m);
+        if (recPath.isNotEmpty()) proc.pollRecording();
+        for (const auto meta : m) if (meta.getMessage().isNoteOn()) ++midiOutNotes;
         if (logBars && (int) (pos / barLen) != lastBar)
         {
             std::cout << "bar " << lastBar + 1 << ":";
@@ -56,6 +62,9 @@ int main (int argc, char** argv)
         }
         for (int c = 0; c < 2; ++c) out.copyFrom (c, pos, blk, c, 0, juce::jmin (bs, total - pos));
     }
+    std::cout << "plugin MIDI out: " << midiOutNotes << " note-ons\n";
+    if (recPath.isNotEmpty()) { proc.stopRecording(); std::cout << "recorded " << proc.recordedBars() << " bars, " << proc.recordedSequence().getNumEvents() / 2 << " notes\n"; ShuffleBuddyProcessor::writeMidiFile (proc.recordedSequence(), 132, juce::File (recPath)); }
+    if (midiPath.isNotEmpty()) { auto seq = proc.printBars (8); std::cout << "printed " << seq.getNumEvents() / 2 << " notes -> " << (ShuffleBuddyProcessor::writeMidiFile (seq, proc.tempoNow() > 0 ? proc.apvts.getRawParameterValue ("tempo")->load() : 120, juce::File (midiPath)) ? midiPath : juce::String ("FAILED")) << "\n"; }
     juce::File f (argv[1]); f.deleteFile();
     juce::WavAudioFormat wav;
     std::unique_ptr<juce::AudioFormatWriter> w (wav.createWriterFor (new juce::FileOutputStream (f), sr, 2, 24, {}, 0));
