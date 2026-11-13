@@ -25,6 +25,14 @@ int main (int argc, char** argv)
         else if (k == "midi") { midiPath = v; }
         else if (k == "rec") { recPath = v; }
         else if (k == "cellx") { auto t = juce::StringArray::fromTokens (v, ",", ""); auto c = proc.cellData (0, t[0].getIntValue(), t[1].getIntValue()); c.ratchet = (juce::uint8) t[2].getIntValue(); c.nudge = (juce::int8) t[3].getIntValue(); c.prob = (juce::uint8) t[4].getIntValue(); proc.setCellData (0, t[0].getIntValue(), t[1].getIntValue(), c); }
+        else if (k == "tomrow")   // 16 chars: F L M H = floor/low/mid/high tom, '.' = rest
+            for (int st = 0; st < juce::jmin (16, v.length()); ++st)
+            {
+                const int a = juce::String ("FLMH").indexOfChar (v[st]);
+                auto c = proc.cellData (proc.currentSlot(), Toms, st);
+                c.vel = a >= 0 ? (juce::uint8) 100 : (juce::uint8) 0; c.prob = 100; if (a >= 0) c.alt = (juce::uint8) a;
+                proc.setCellData (proc.currentSlot(), Toms, st, c);
+            }
         else if (k == "genre") { proc.loadGenre (v.getIntValue()); set ("chain", 2); }
         else if (k == "kick") proc.applyKickPreset (v.getIntValue());
         else if (k == "kit") proc.applyKit (v.getIntValue());
@@ -34,7 +42,7 @@ int main (int argc, char** argv)
         else if (k == "tail") tailSec = v.getDoubleValue();
         else if (k == "grid" && v.length() == NumPads * 16)
             for (int i = 0; i < v.length(); ++i) proc.setCell (proc.currentSlot(), i / 16, i % 16, (juce::uint8) (v[i] - '0'));
-        else if (k != "style" && k != "log" && k != "chainlog" && k != "midi" && k != "rec" && k != "cellx" && k != "genre") set (k, v.getFloatValue());
+        else if (k != "style" && k != "log" && k != "chainlog" && k != "midi" && k != "rec" && k != "cellx" && k != "genre" && k != "tomrow") set (k, v.getFloatValue());
     }
     set ("play", 1);
     proc.prepareToPlay (sr, bs);

@@ -68,6 +68,13 @@ struct Patch
     float roomSize = 1.0f;    // 0.5 = closet, 1 = small room, 2 = big room; also darker as it grows
     int   real = -1;          // index of a RealSet layered underneath (-1 = none)
     float realMix = 0.0f, realRoom = 0.6f, realTune = 0.0f;   // level, room-mic level, semitones
+    int   realHi = -1;        // toms: a second recorded drum for the mid/high toms (alt 2/3)
+    float realHiSemis = 0.0f; // how far above the low drum it sits naturally
+    float realHiGain = 1.0f;  // level match between the two drums
+    // membrane: a struck drum head rings at inharmonic Bessel modes (1, 1.59, 2.14, 2.30, 2.65 x f0),
+    // the higher ones dying first. This is what turns a sine "boop" into a tom or a conga.
+    float modes = 0.0f, modeDecay = 0.5f;
+    float trim = 1.0f;        // loudness match (set from the level audit, tools/level_audit.py)
     int   grains = 0;         // >0: noise comes as random little grains (rattles, shuffles, foley)
     float grainSpread = 0.06f, grainDecay = 0.006f;
     float gain = 1.0f;
@@ -82,13 +89,13 @@ public:
 
     void trigger (int p, float vel, const Patch& patch, float tuneSemis, float decay, float level, const SampleData* sample,
                   float sr, juce::int64 now, juce::uint32 seed, float echoSend = 0.0f, float spaceSend = 0.0f,
-                  const RealSet* realSet = nullptr, float realScale = 1.0f, float roomScale = 1.0f)
+                  const RealSet* realSet = nullptr, float realScale = 1.0f, float roomScale = 1.0f, float realExtraSemis = 0.0f, bool hiDrum = false)
     {
         padId = p; on = true; started = now; fs = sr; t = 0;
         sendE = echoSend; sendS = spaceSend;
         v = juce::jlimit (0.0f, 1.0f, vel);
         bright = 0.55f + 0.45f * v;
-        gain = level;
+        gain = level * (smp != nullptr ? 1.0f : patch.trim);
         tune = std::exp2 (tuneSemis / 12.0f);
         smp = sample; smpPos = 0.0;
         rng = seed | 1u;
@@ -128,6 +135,7 @@ public:
             meC = coef (P.metalDecay * dm); meA = P.metal > 0.0f ? 1.0f : 0.0f;
             noC = coef (P.noiseDecay * dm); noA = P.noise > 0.0f ? 1.0f : 0.0f;
             fmC = coef (P.fmDecay * dm);  fmA = 1.0f;
+            for (int k = 0; k < 4; ++k) { static const float md[4] = { 0.62f, 0.45f, 0.38f, 0.26f }; modeC[(size_t) k] = coef (P.decay * dm * P.modeDecay * md[k] * 2.0f); modeA[(size_t) k] = P.modes > 0.0f ? 1.0f : 0.0f; phX[(size_t) k] = 0.25 * k; }
             fN.set (P.noiseHz, P.noiseQ, fs);
             fM.set (P.metalBp, 1.2f, fs);
             fC.set (2400.0f + 4500.0f * P.clickTone, 1.4f, fs);
@@ -155,12 +163,18 @@ public:
                 const int layer = v < 0.45f ? 0 : (v < 0.8f ? 1 : 2);
                 int cands[16]; int nc = 0;
                 for (int k = 0; k < (int) realSet->clips.size() && nc < 16; ++k) if (realSet->clips[(size_t) k].vel == layer) cands[nc++] = k;
-                if (nc == 0) for (int k = 0; k < (int) realSet->clips.size() && nc < 16; ++k) cands[nc++] = k;
+                if (nc == 0)   // this set has fewer layers: use the loudest one at or below the asked layer
+                {
+                    int best = -1, lowest = 99;
+                    for (auto& c : realSet->clips) { if (c.vel <= layer) best = juce::jmax (best, c.vel); lowest = juce::jmin (lowest, c.vel); }
+                    if (best < 0) best = lowest;
+                    for (int k = 0; k < (int) realSet->clips.size() && nc < 16; ++k) if (realSet->clips[(size_t) k].vel == best) cands[nc++] = k;
+                }
                 const int pickK = cands[(int) ((0.5f * (noise() + 1.0f)) * (float) nc) % nc];
                 realBuf = &realSet->clips[(size_t) pickK].buf;
-                realRate = 44100.0 / fs * tune * std::exp2 (P.realTune / 12.0f);
-                realGainC = P.realMix * realScale;
-                realGainR = P.realRoom * roomScale * P.realMix * juce::jmax (0.35f, realScale);
+                realRate = 44100.0 / fs * tune * std::exp2 ((P.realTune + realExtraSemis) / 12.0f);
+                realGainC = P.realMix * realScale * (hiDrum ? P.realHiGain : 1.0f);
+                realGainR = P.realRoom * roomScale * P.realMix * juce::jmax (0.35f, realScale) * (hiDrum ? P.realHiGain : 1.0f);
                 if (decay < 0.99f) realEnvC = coef (0.08f + decay * decay * 1.6f); else realEnvC = 1.0f;
                 realEnv = 1.0f;
             }
@@ -171,6 +185,7 @@ public:
             lpS1 = lpS2 = hpS = 0.0f;
             driveK = 1.0f + 8.0f * P.drive * P.drive;
             driveN = 1.0f / std::tanh (driveK);
+            driveMix = juce::jmin (1.0f, P.drive * 2.5f);
         }
         ghostLp = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * (2500.0f + 16000.0f * v * v) / fs);
     }
@@ -263,13 +278,28 @@ private:
                 pm = P.fmIndex * fmA * std::sin (juce::MathConstants<double>::twoPi * phM) / juce::MathConstants<double>::twoPi;
                 fmA *= fmC;
             }
-            float b = 0.0f;
+            float b = 0.0f, modeOut = 0.0f;
             if (amp > 0.0005f)
             {
                 b = shape (P.wave, ph0 + pm) * P.body;
                 if (P.level2 > 0.0f) { ph2 += f * P.ratio2 / fs; ph2 -= std::floor (ph2); b += shape (P.wave, ph2 + pm) * P.level2; }
-                if (P.drive > 0.0f) b = std::tanh (b * driveK) * driveN;   // drive before the envelope: grit without stretching the tail
-                b *= amp;
+                if (P.modes > 0.0f)
+                {
+                    static const double mr[4] = { 1.594, 2.136, 2.296, 2.653 };
+                    static const float ma[4] = { 0.6f, 0.38f, 0.3f, 0.18f };
+                    float mm = 0.0f;
+                    for (int k = 0; k < 4; ++k)
+                    {
+                        phX[(size_t) k] += f * mr[k] / fs; phX[(size_t) k] -= std::floor (phX[(size_t) k]);
+                        mm += (float) std::sin (juce::MathConstants<double>::twoPi * phX[(size_t) k]) * ma[k] * modeA[(size_t) k] * bright;
+                        modeA[(size_t) k] *= modeC[(size_t) k];
+                    }
+                    modeOut = mm * P.modes;   // own envelopes, added after the body's drive + amp
+                }
+                // drive before the envelope (grit without stretching the tail), but it eases off as the hit dies away,
+                // like a real overdriven channel: a loud dirty attack and a clean round tail, never a buzzing one
+                if (P.drive > 0.0f) b += (std::tanh (b * driveK) * driveN - b) * driveMix * (0.2f + 0.8f * amp);
+                b = b * amp + modeOut; modeOut = 0.0f;
                 if (t >= holdN) amp *= ampC;
             }
             float sb = 0.0f;
@@ -382,7 +412,7 @@ private:
     Patch P;
     float fs = 48000.0f, v = 1.0f, bright = 1.0f, gain = 1.0f, tune = 1.0f;
     float amp = 0, ampC = 0.999f, subA = 0, subC = 0.999f, knA = 0, knC = 0.99f, meA = 0, meC = 0.99f, noA = 0, noC = 0.99f, fmA = 1, fmC = 0.999f;
-    float fade = 1.0f, fadeC = 0.998f, driveK = 1.0f, driveN = 1.0f, dropN = 1000.0f;
+    float fade = 1.0f, fadeC = 0.998f, driveK = 1.0f, driveN = 1.0f, driveMix = 0.0f, dropN = 1000.0f;
     int holdN = 0, gateN = 1 << 30, attN = 1;
     float sendE = 0.0f, sendS = 0.0f;
     float ghostLp = 1.0f, lpState = 0.0f, hpM = 0.0f, hpMc = 0.5f, hpN = 0.0f, clickLp = 0.0f, panL = 1.0f, panR = 1.0f;
@@ -398,6 +428,8 @@ private:
     std::array<float, 16> grainT {}, grainA {};
     double ph0 = 0, ph2 = 0, phM = 0, phK = 0;
     std::array<double, 6> ph6 {};
+    std::array<double, 4> phX {};
+    std::array<float, 4> modeA {}, modeC {};
     Svf fN, fM, fC;
     const SampleData* smp = nullptr;
     double smpPos = 0.0;

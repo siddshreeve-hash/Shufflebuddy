@@ -67,6 +67,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShuffleBuddyProcessor::creat
         add (new APF ({ "krumble", 1 }, "Kick Rumble", NR (0.0f, 1.0f), 0.0f, fmt (pct)));
         add (new APF ({ "kreal", 1 }, "Kick Real Layer", NR (0.0f, 1.0f), 0.2f, fmt (pct)));
         add (new APF ({ "kroom", 1 }, "Kick Room Mic", NR (0.0f, 1.0f), 0.35f, fmt (pct)));
+        add (new APF ({ "kgain", 1 }, "Kick Output", NR (0.25f, 2.0f), 1.0f, fmt (pct)));   // presets set it so they all sit at the same loudness
     }
     // ---- FILLS + MIDI
     add (new juce::AudioParameterChoice ({ "filltype", 1 }, "Fill Type", juce::StringArray { "Auto", "Toms", "Snare Roll", "Kick Doubles", "Hat Lift", "Drop-out" }, 0));
@@ -76,7 +77,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShuffleBuddyProcessor::creat
     add (new juce::AudioParameterBool ({ "midiout", 1 }, "MIDI Out", true));
     juce::StringArray soundNames;
     for (auto& snd : sounds::library()) soundNames.add (snd.name);
-    static const char* padDefault[NumPads] = { "", "Garage Snare", "808 Clap", "808 Rim", "808 Hat", "Garage Open Hat", "Perc Thud", "Shaker", "808 Tom Low", "Crash" };
+    static const char* padDefault[NumPads] = { "", "Garage Snare", "808 Clap", "808 Rim", "808 Hat", "Garage Open Hat", "Perc Thud", "Shaker", "Studio Tom", "Crash" };
     static const int noteDefault[NumPads] = { 36, 38, 39, 37, 42, 46, 47, 44, 45, 49 };   // Ableton Drum Rack layout (toms: 41/45/48/50 by pitch)
     for (int i = 0; i < NumPads; ++i)
     {
@@ -89,9 +90,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShuffleBuddyProcessor::creat
         add (new APF ({ pid ("lswing", i), 1 }, n + " swing", NR (0.0f, 1.5f, 0.05f), 1.0f, fmt (pct)));
         add (new juce::AudioParameterInt ({ pid ("note", i), 1 }, n + " MIDI note", 0, 127, noteDefault[i]));
         add (new APF ({ pid ("room", i), 1 }, n + " room", NR (0.0f, 2.0f), 1.0f, fmt (pct)));
-        // mix balance: kick on top, snare + clap well under it (they stack on 2 and 4), hats sitting in
-        static const float lvlDef[NumPads] = { 0.85f, 0.22f, 0.24f, 0.40f, 0.70f, 0.55f, 0.45f, 0.50f, 0.50f, 0.32f };
-        add (new APF ({ pid ("lvl", i), 1 }, n + " level", NR (0.0f, 1.0f), lvlDef[i], fmt (pct)));
+        // mix balance: every sound is loudness-matched (SoundTrims.h), so the pad levels alone set the mix:
+        // kick on top, snare/clap ~15 dB under it by loudness, hats and percussion sitting in, toms up for fills
+        add (new APF ({ pid ("lvl", i), 1 }, n + " level", NR (0.0f, 1.0f), sounds::defaultLevel (i), fmt (pct)));
         add (new APF ({ pid ("tune", i), 1 }, n + " tune", NR (-12.0f, 12.0f, 0.1f), 0.0f, fmt ([] (float x) { return (x > 0 ? "+" : "") + juce::String (x, 1); })));
         add (new APF ({ pid ("decay", i), 1 }, n + " decay", NR (0.0f, 1.0f), 0.45f, fmt (pct)));
         add (new APF ({ pid ("push", i), 1 }, n + " push", NR (-20.0f, 30.0f, 0.5f), 0.0f,
@@ -221,6 +222,7 @@ Patch ShuffleBuddyProcessor::kickPatch (double bpm) const
     k.velPitch = 0.5f;
     k.real = sounds::real ("kick"); k.realMix = p ("kreal"); k.realRoom = p ("kroom");
     k.gain = 0.9f / (1.0f + 0.35f * k.sub);
+    k.trim = p ("kgain");
     return k;
 }
 
@@ -242,6 +244,7 @@ void ShuffleBuddyProcessor::applyKickPreset (int index)
     setParamValue ("kknock", k.knock);         setParamValue ("kknockf", k.knockHz);
     setParamValue ("klen", (float) k.length);  setParamValue ("kduck", k.duck);   setParamValue ("krumble", k.rumble);
     setParamValue ("kreal", k.real);           setParamValue ("kroom", k.roomMic);
+    setParamValue ("kgain", sounds::kickTrim (k.name));
     setParamValue ("tune1", 0.0f);             setParamValue ("decay1", 0.45f);
     kickName = k.name;
 }
@@ -446,9 +449,11 @@ void ShuffleBuddyProcessor::trigger (int pad, float vel, int alt)
     const Patch& patch = pad == Kick ? kickNow : sounds::library()[(size_t) juce::jlimit (0, (int) sounds::library().size() - 1, (int) padSnd[i]->load())].p;
     auto* smpl = liveSample[i].load();
     const RealSet* rs = realSet (patch.real);
+    float realExtra = 0.0f; bool hiDrum = false;
+    if (pad == Toms && patch.realHi >= 0 && alt >= 2) { rs = realSet (patch.realHi); realExtra = -patch.realHiSemis; hiDrum = true; }   // mid/high toms: the smaller drum
     pick->trigger (pad, vel, patch, padTune[i]->load() + altTune, padDecay[i]->load(), padLevel[i]->load(), smpl,
                    (float) getSampleRate(), sampleClock, (juce::uint32) rng.nextInt(), padEcho[i]->load(), padSpace[i]->load(),
-                   rs, padReal[i]->load(), padRoom[i]->load());
+                   rs, padReal[i]->load(), padRoom[i]->load(), realExtra, hiDrum);
     if (smpl != nullptr && padLayer[i]->load() > 0.5f)   // LAYER: the synth plays underneath the WAV
     {
         DrumVoice* second = nullptr;
@@ -456,7 +461,7 @@ void ShuffleBuddyProcessor::trigger (int pad, float vel, int alt)
         if (second != nullptr)
             second->trigger (pad, vel, patch, padTune[i]->load() + altTune, padDecay[i]->load(), padLevel[i]->load(), nullptr,
                              (float) getSampleRate(), sampleClock, (juce::uint32) rng.nextInt(), padEcho[i]->load(), padSpace[i]->load(),
-                             rs, padReal[i]->load(), padRoom[i]->load());
+                             rs, padReal[i]->load(), padRoom[i]->load(), realExtra, hiDrum);
     }
     hitVel[i].store (vel);
     hitCount[i].fetch_add (1);
@@ -855,11 +860,15 @@ void ShuffleBuddyProcessor::runChunk (float* L, float* R, int n)
         float* chans[2] = { L, R };
         juce::dsp::AudioBlock<float> block (chans, 2, (size_t) n);
         auto up = oversampler->processSamplesUp (block);
+        // tape-ish warmth that comes in with SQUASH. At 0 it is clean up to a soft knee near full scale,
+        // so long kick tails and toms don't get a constant fuzz on them.
         const float drive = 1.0f + squash * 1.6f, comp = 1.0f / std::tanh (drive);
+        const float gw = drive * comp * 0.92f, wet = juce::jmin (1.0f, squash * 2.0f);
+        auto knee = [] (float x) { const float a = std::abs (x); return a <= 0.75f ? x : std::copysign (0.75f + 0.25f * std::tanh ((a - 0.75f) / 0.25f), x); };
         for (size_t c = 0; c < 2; ++c)
         {
             auto* d = up.getChannelPointer (c);
-            for (size_t i = 0; i < up.getNumSamples(); ++i) d[i] = std::tanh (d[i] * drive) * comp * 0.92f;
+            for (size_t i = 0; i < up.getNumSamples(); ++i) { const float x = d[i]; d[i] = knee (x * gw) + (std::tanh (x * drive) * comp * 0.92f - knee (x * gw)) * wet; }
         }
         oversampler->processSamplesDown (block);
     }

@@ -1,5 +1,6 @@
 #pragma once
 #include "DrumVoices.h"
+#include "SoundTrims.h"
 #include <vector>
 #include <functional>
 
@@ -15,7 +16,9 @@ namespace sounds
     inline const juce::StringArray& realNames()
     {
         static const juce::StringArray n { "kick", "snare", "snareoff", "rimshot", "crossstick", "hhclosed", "hh34", "hhopen", "hhpedal",
-                                           "shaker", "cabasa", "tambourine", "claves", "woodblock", "conga", "bongo", "cowbell", "guiro" };
+                                           "shaker", "cabasa", "tambourine", "claves", "woodblock", "conga", "bongo", "cowbell", "guiro",
+                                           // added: toms, hand drums, rims, bells (append only: patches store these indexes)
+                                           "tomlo", "tomhi", "tommute", "tomrim", "stickshot", "congaopen", "congamute", "tumba", "bongolo", "agogohi", "agogolo" };
         return n;
     }
     inline int real (const char* name) { const int i = realNames().indexOf (name); jassert (i >= 0); return i; }
@@ -86,14 +89,14 @@ namespace sounds
             v.push_back (mk ("Rattle", "Shakers", [] (Patch& p) { p.noise = 1.0f; p.noiseHz = 4500; p.noiseQ = 1.1f; p.noiseDecay = 0.05f; p.grains = 10; p.grainSpread = 0.07f; p.grainDecay = 0.005f; p.crush = 0.3f; p.lpHz = 9000; p.room = 0.15f; p.gain = 1.1f; p.real = real ("guiro"); p.realMix = 0.3f; p.realRoom = 0.6f; }));
             v.push_back (mk ("Keys Jangle", "Shakers", [] (Patch& p) { p.noise = 0.7f; p.noiseHz = 7000; p.noiseQ = 1.5f; p.noiseDecay = 0.12f; p.grains = 14; p.grainSpread = 0.12f; p.grainDecay = 0.008f; p.metal = 0.4f; p.metalScale = 2.5f; p.metalBp = 7000; p.metalDecay = 0.15f; p.lpHz = 10000; p.room = 0.2f; p.gain = 1.0f; p.real = real ("tambourine"); p.realMix = 0.3f; p.realRoom = 0.7f; }));
             // ---------------- TOMS & CONGAS
-            v.push_back (mk ("808 Tom Low", "Toms & Congas", [] (Patch& p) { p.freq = 90; p.sweep = 1.25f; p.drop = 0.06f; p.decay = 0.35f; p.body = 1; p.noise = 0.05f; p.noiseMode = 0; p.noiseHz = 3000; p.noiseDecay = 0.02f; p.gain = 0.85f; }));
-            v.push_back (mk ("808 Tom High", "Toms & Congas", [] (Patch& p) { p.freq = 165; p.sweep = 1.25f; p.drop = 0.05f; p.decay = 0.25f; p.body = 1; p.gain = 0.8f; }));
-            v.push_back (mk ("909 Tom", "Toms & Congas", [] (Patch& p) { p.freq = 130; p.sweep = 1.6f; p.drop = 0.03f; p.decay = 0.25f; p.body = 1; p.noise = 0.25f; p.noiseHz = 1500; p.noiseDecay = 0.03f; p.drive = 0.2f; p.gain = 0.8f; }));
-            v.push_back (mk ("808 Conga", "Toms & Congas", [] (Patch& p) { p.freq = 330; p.sweep = 1.1f; p.drop = 0.01f; p.decay = 0.16f; p.body = 1; p.gain = 0.8f; p.real = real ("conga"); p.realMix = 0.3f; p.realRoom = 0.5f; p.realTune = 4.0f; }));
-            v.push_back (mk ("Low Conga", "Toms & Congas", [] (Patch& p) { p.freq = 210; p.sweep = 1.15f; p.drop = 0.012f; p.decay = 0.2f; p.body = 1; p.gain = 0.8f; p.real = real ("conga"); p.realMix = 0.4f; p.realRoom = 0.6f; p.realTune = -1.0f; }));
-            v.push_back (mk ("Bongo", "Toms & Congas", [] (Patch& p) { p.freq = 420; p.sweep = 1.2f; p.drop = 0.006f; p.decay = 0.09f; p.body = 1; p.click = 0.2f; p.clickType = 1; p.gain = 0.8f; p.real = real ("bongo"); p.realMix = 0.6f; p.realRoom = 0.6f; }));
-            v.push_back (mk ("Talking Drum", "Toms & Congas", [] (Patch& p) { p.freq = 180; p.sweep = 1.8f; p.drop = 0.12f; p.curve = 0.9f; p.decay = 0.3f; p.body = 1; p.gain = 0.8f; }));
-            v.push_back (mk ("Perc Thud", "Toms & Congas", [] (Patch& p) { p.wave = 2; p.freq = 262; p.sweep = 1.45f; p.drop = 0.018f; p.decay = 0.17f; p.body = 0.9f; p.gain = 0.85f; p.real = real ("conga"); p.realMix = 0.3f; p.realRoom = 0.5f; }));
+            v.push_back (mk ("808 Tom Low", "Toms", [] (Patch& p) { p.freq = 92; p.sweep = 1.16f; p.drop = 0.045f; p.decay = 0.2f; p.body = 1; p.modes = 0.06f; p.noise = 0.1f; p.noiseMode = 0; p.noiseHz = 2500; p.noiseDecay = 0.03f; p.gain = 0.85f; }));
+            v.push_back (mk ("808 Tom High", "Toms", [] (Patch& p) { p.freq = 150; p.sweep = 1.16f; p.drop = 0.04f; p.decay = 0.16f; p.body = 1; p.modes = 0.06f; p.noise = 0.1f; p.noiseMode = 0; p.noiseHz = 3000; p.noiseDecay = 0.025f; p.gain = 0.8f; }));
+            v.push_back (mk ("909 Tom", "Toms", [] (Patch& p) { p.freq = 120; p.sweep = 1.35f; p.drop = 0.022f; p.decay = 0.2f; p.body = 1; p.modes = 0.15f; p.noise = 0.3f; p.noiseHz = 1500; p.noiseDecay = 0.04f; p.drive = 0.2f; p.click = 0.2f; p.clickType = 3; p.gain = 0.8f; }));
+            v.push_back (mk ("808 Conga", "Congas & Hand Drums", [] (Patch& p) { p.freq = 330; p.sweep = 1.1f; p.drop = 0.01f; p.decay = 0.11f; p.body = 1; p.gain = 0.8f; p.real = real ("congaopen"); p.realMix = 0.3f; p.realRoom = 0.5f; p.realTune = 4.0f; }));
+            v.push_back (mk ("Low Conga", "Congas & Hand Drums", [] (Patch& p) { p.freq = 210; p.sweep = 1.15f; p.drop = 0.012f; p.decay = 0.13f; p.body = 1; p.gain = 0.8f; p.real = real ("congaopen"); p.realMix = 0.4f; p.realRoom = 0.6f; p.realTune = -1.0f; }));
+            v.push_back (mk ("Bongo", "Congas & Hand Drums", [] (Patch& p) { p.freq = 420; p.sweep = 1.2f; p.drop = 0.006f; p.decay = 0.09f; p.body = 1; p.click = 0.2f; p.clickType = 1; p.gain = 0.8f; p.real = real ("bongo"); p.realMix = 0.6f; p.realRoom = 0.6f; }));
+            v.push_back (mk ("Talking Drum", "Congas & Hand Drums", [] (Patch& p) { p.freq = 180; p.sweep = 1.8f; p.drop = 0.12f; p.curve = 0.9f; p.decay = 0.2f; p.body = 1; p.gain = 0.8f; }));
+            v.push_back (mk ("Perc Thud", "Congas & Hand Drums", [] (Patch& p) { p.wave = 2; p.freq = 262; p.sweep = 1.45f; p.drop = 0.018f; p.decay = 0.12f; p.body = 0.9f; p.gain = 0.85f; p.real = real ("congaopen"); p.realMix = 0.3f; p.realRoom = 0.5f; }));
             // ---------------- BELLS & METAL
             v.push_back (mk ("808 Cowbell", "Bells & Metal", [] (Patch& p) { p.wave = 3; p.freq = 540; p.ratio2 = 1.48f; p.level2 = 1.0f; p.body = 0.5f; p.hold = 0.006f; p.decay = 0.12f; p.gain = 0.55f; p.real = real ("cowbell"); p.realMix = 0.25f; p.realRoom = 0.5f; }));
             v.push_back (mk ("Agogo", "Bells & Metal", [] (Patch& p) { p.freq = 900; p.fmRatio = 1.4f; p.fmIndex = 1.2f; p.fmDecay = 0.08f; p.body = 0.8f; p.decay = 0.15f; p.gain = 0.7f; }));
@@ -122,10 +125,38 @@ namespace sounds
             v.push_back (mk ("Real Tambourine", "Real Kit (recorded)", [] (Patch& p) { p.real = real ("tambourine"); p.realMix = 1.0f; p.realRoom = 0.6f; p.gain = 1.3f; }));
             v.push_back (mk ("Real Claves", "Real Kit (recorded)", [] (Patch& p) { p.real = real ("claves"); p.realMix = 1.0f; p.realRoom = 0.7f; p.gain = 1.2f; }));
             v.push_back (mk ("Real Woodblock", "Real Kit (recorded)", [] (Patch& p) { p.real = real ("woodblock"); p.realMix = 1.0f; p.realRoom = 0.0f; p.gain = 1.0f; }));
-            v.push_back (mk ("Real Conga", "Real Kit (recorded)", [] (Patch& p) { p.real = real ("conga"); p.realMix = 1.0f; p.realRoom = 0.6f; p.gain = 1.0f; }));
+            v.push_back (mk ("Real Conga", "Real Kit (recorded)", [] (Patch& p) { p.real = real ("congaopen"); p.realMix = 1.0f; p.realRoom = 0.6f; p.gain = 1.0f; }));
             v.push_back (mk ("Real Bongo", "Real Kit (recorded)", [] (Patch& p) { p.real = real ("bongo"); p.realMix = 1.0f; p.realRoom = 0.6f; p.gain = 1.0f; }));
             v.push_back (mk ("Real Cowbell", "Real Kit (recorded)", [] (Patch& p) { p.real = real ("cowbell"); p.realMix = 1.0f; p.realRoom = 0.5f; p.gain = 1.0f; }));
             v.push_back (mk ("Real Guiro", "Real Kit (recorded)", [] (Patch& p) { p.real = real ("guiro"); p.realMix = 1.0f; p.realRoom = 0.6f; p.gain = 1.6f; }));
+            // ---------------- added: real toms, hand drums, rims and bells (append only: pads store the index)
+            // TOMS: recorded close + room mics underneath a membrane synth. Low/floor toms play the big drum,
+            // mid/high toms switch to the small drum, so fills don't sound pitch-shifted.
+            v.push_back (mk ("Studio Tom", "Toms", [] (Patch& p) { p.freq = 116; p.sweep = 1.1f; p.drop = 0.05f; p.decay = 0.3f; p.body = 0.3f; p.modes = 0.25f; p.modeDecay = 0.45f; p.click = 0.12f; p.clickType = 3; p.real = real ("tomlo"); p.realHi = real ("tomhi"); p.realHiSemis = 7.8f; p.realHiGain = 1.3f; p.realMix = 1.0f; p.realRoom = 0.6f; }));
+            v.push_back (mk ("Muted Tom", "Toms", [] (Patch& p) { p.freq = 110; p.sweep = 1.15f; p.drop = 0.03f; p.decay = 0.09f; p.body = 0.3f; p.real = real ("tommute"); p.realMix = 1.0f; p.realRoom = 0.35f; }));
+            v.push_back (mk ("Tom Rim", "Toms", [] (Patch& p) { p.real = real ("tomrim"); p.realMix = 1.0f; p.realRoom = 0.5f; p.freq = 190; p.body = 0.15f; p.decay = 0.06f; }));
+            v.push_back (mk ("Dub Tom", "Toms", [] (Patch& p) { p.freq = 98; p.sweep = 1.15f; p.drop = 0.05f; p.decay = 0.3f; p.body = 1; p.modes = 0.3f; p.modeDecay = 0.4f; p.noise = 0.18f; p.noiseMode = 0; p.noiseHz = 1200; p.noiseDecay = 0.03f; p.lpHz = 5000; p.room = 0.3f; p.real = real ("tomlo"); p.realHi = real ("tomhi"); p.realHiSemis = 7.8f; p.realHiGain = 1.3f; p.realMix = 0.35f; p.realRoom = 0.8f; p.realTune = -2.0f; }));
+            v.push_back (mk ("Floor Thud", "Toms", [] (Patch& p) { p.freq = 72; p.sweep = 1.3f; p.drop = 0.03f; p.decay = 0.17f; p.body = 1; p.modes = 0.3f; p.modeDecay = 0.35f; p.click = 0.25f; p.clickType = 1; p.clickTone = 0.2f; p.lpHz = 6500; p.real = real ("tomlo"); p.realMix = 0.5f; p.realRoom = 0.5f; p.realTune = -5.0f; }));
+            v.push_back (mk ("Simmons Tom", "Toms", [] (Patch& p) { p.freq = 105; p.sweep = 2.0f; p.drop = 0.07f; p.curve = 0.35f; p.decay = 0.22f; p.body = 1; p.noise = 0.3f; p.noiseHz = 2400; p.noiseDecay = 0.12f; p.drive = 0.15f; p.room = 0.3f; }));
+            // CONGAS & HAND DRUMS
+            v.push_back (mk ("Conga Open", "Congas & Hand Drums", [] (Patch& p) { p.freq = 165; p.sweep = 1.05f; p.drop = 0.02f; p.decay = 0.15f; p.body = 0.25f; p.modes = 0.12f; p.real = real ("congaopen"); p.realMix = 1.0f; p.realRoom = 0.5f; }));
+            v.push_back (mk ("Conga Mute", "Congas & Hand Drums", [] (Patch& p) { p.real = real ("congamute"); p.realMix = 1.0f; p.realRoom = 0.4f; p.freq = 240; p.body = 0.12f; p.decay = 0.04f; }));
+            v.push_back (mk ("Tumba", "Congas & Hand Drums", [] (Patch& p) { p.freq = 139; p.sweep = 1.05f; p.drop = 0.02f; p.decay = 0.2f; p.body = 0.25f; p.modes = 0.12f; p.real = real ("tumba"); p.realMix = 1.0f; p.realRoom = 0.5f; }));
+            v.push_back (mk ("Bongo Low", "Congas & Hand Drums", [] (Patch& p) { p.real = real ("bongolo"); p.realMix = 1.0f; p.realRoom = 0.5f; p.freq = 263; p.body = 0.15f; p.decay = 0.07f; }));
+            v.push_back (mk ("Djembe", "Congas & Hand Drums", [] (Patch& p) { p.freq = 92; p.sweep = 1.15f; p.drop = 0.02f; p.decay = 0.13f; p.body = 0.8f; p.modes = 0.4f; p.modeDecay = 0.35f; p.noise = 0.3f; p.noiseHz = 1800; p.noiseDecay = 0.025f; p.click = 0.3f; p.clickType = 3; p.real = real ("tumba"); p.realMix = 0.45f; p.realRoom = 0.5f; p.realTune = -3.0f; }));
+            v.push_back (mk ("Timbale", "Congas & Hand Drums", [] (Patch& p) { p.freq = 430; p.sweep = 1.04f; p.drop = 0.01f; p.decay = 0.2f; p.body = 0.7f; p.modes = 0.5f; p.modeDecay = 0.5f; p.metal = 0.15f; p.metalScale = 0.8f; p.metalBp = 4500; p.metalHp = 2500; p.metalDecay = 0.25f; p.noise = 0.2f; p.noiseHz = 3000; p.noiseDecay = 0.02f; p.click = 0.4f; p.clickType = 3; p.room = 0.2f; }));
+            v.push_back (mk ("Timbale Shell", "Congas & Hand Drums", [] (Patch& p) { p.wave = 1; p.freq = 1700; p.decay = 0.025f; p.body = 0.5f; p.noise = 0.5f; p.noiseHz = 4000; p.noiseQ = 2.0f; p.noiseDecay = 0.02f; p.click = 0.6f; p.clickType = 2; p.metal = 0.2f; p.metalDecay = 0.04f; p.real = real ("stickshot"); p.realMix = 0.4f; p.realRoom = 0.4f; p.realTune = 4.0f; }));
+            // RIMS
+            v.push_back (mk ("Stick Shot", "Rims & Clicks", [] (Patch& p) { p.real = real ("stickshot"); p.realMix = 1.0f; p.realRoom = 0.4f; }));
+            v.push_back (mk ("Rim Crack", "Rims & Clicks", [] (Patch& p) { p.freq = 520; p.ratio2 = 1.7f; p.level2 = 0.5f; p.body = 0.35f; p.decay = 0.05f; p.click = 0.4f; p.clickType = 3; p.room = 0.15f; p.roomSize = 0.7f; p.real = real ("rimshot"); p.realMix = 0.9f; p.realRoom = 0.4f; }));
+            v.push_back (mk ("Side Stick", "Rims & Clicks", [] (Patch& p) { p.freq = 1700; p.body = 0.2f; p.decay = 0.012f; p.real = real ("crossstick"); p.realMix = 1.0f; p.realRoom = 0.15f; }));
+            v.push_back (mk ("Dub Rim", "Rims & Clicks", [] (Patch& p) { p.lpHz = 6000; p.room = 0.4f; p.roomSize = 1.0f; p.real = real ("crossstick"); p.realMix = 1.0f; p.realRoom = 0.8f; p.realTune = -2.0f; }));
+            // BELLS
+            v.push_back (mk ("Agogo High", "Bells & Metal", [] (Patch& p) { p.real = real ("agogohi"); p.realMix = 1.0f; p.realRoom = 0.4f; }));
+            v.push_back (mk ("Agogo Low", "Bells & Metal", [] (Patch& p) { p.real = real ("agogolo"); p.realMix = 1.0f; p.realRoom = 0.4f; }));
+            // SNARES for breaks and drum & bass
+            v.push_back (mk ("DnB Snare", "Snares", [] (Patch& p) { p.freq = 225; p.sweep = 1.6f; p.drop = 0.01f; p.ratio2 = 1.65f; p.level2 = 0.3f; p.body = 0.6f; p.decay = 0.07f; p.noise = 0.75f; p.noiseHz = 3800; p.noiseQ = 0.5f; p.noiseDecay = 0.13f; p.drive = 0.35f; p.click = 0.3f; p.clickType = 3; p.hpHz = 140; p.room = 0.1f; p.roomSize = 0.6f; p.real = real ("snare"); p.realMix = 0.7f; p.realRoom = 0.35f; p.realTune = 1.0f; }));
+            v.push_back (mk ("Break Snare", "Snares", [] (Patch& p) { p.freq = 200; p.sweep = 1.4f; p.drop = 0.012f; p.body = 0.5f; p.decay = 0.08f; p.noise = 0.6f; p.noiseHz = 2600; p.noiseQ = 0.6f; p.noiseDecay = 0.14f; p.drive = 0.3f; p.crush = 0.35f; p.lpHz = 9500; p.hpHz = 110; p.room = 0.2f; p.roomSize = 0.8f; p.real = real ("snare"); p.realMix = 0.85f; p.realRoom = 0.6f; p.realTune = 2.0f; }));
             // tighten: shorter snare/clap tails, and every room (real room mics + synth room) at half size
             for (auto& snd : v)
             {
@@ -134,6 +165,7 @@ namespace sounds
                 snd.p.realRoom *= 0.45f;
                 snd.p.room *= 0.5f;
                 snd.p.roomSize = juce::jmin (snd.p.roomSize, 1.0f);
+                snd.p.trim = soundTrim (snd.name);
             }
             return v;
         }();
@@ -160,21 +192,21 @@ namespace sounds
         static const std::vector<KickPreset> k = {
             //  name                wave freq start drop   curve hold  decay drive click type tone  sub  subdec knock khz  len duck rumble
             { "Garage Thud",        0, 52, 3.6f, 0.026f, 0.2f, 0.015f, 0.10f, 0.25f, 0.35f, 1, 0.55f, 0.35f, 0.15f, 0.15f, 190, 0, 0.15f, 0.0f , 0.2f, 0.35f },
-            { "808 Long",           0, 45, 2.0f, 0.05f,  0.3f, 0.01f,  0.25f, 0.1f,  0.1f,  2, 0.5f,  0.8f,  0.9f,  0.0f,  180, 0, 0.2f,  0.0f , 0.0f, 0.15f },
-            { "808 Short",          0, 48, 2.2f, 0.04f,  0.3f, 0.01f,  0.12f, 0.15f, 0.15f, 2, 0.5f,  0.5f,  0.3f,  0.0f,  180, 0, 0.1f,  0.0f , 0.05f, 0.2f },
+            { "808 Long",           0, 45, 2.0f, 0.04f,  0.15f,0.01f,  0.3f,  0.0f,  0.1f,  2, 0.5f,  0.7f,  0.8f,  0.0f,  180, 0, 0.2f,  0.0f , 0.0f, 0.15f },
+            { "808 Short",          0, 48, 2.2f, 0.035f, 0.15f,0.01f,  0.12f, 0.1f,  0.15f, 2, 0.5f,  0.5f,  0.2f,  0.0f,  180, 0, 0.1f,  0.0f , 0.05f, 0.2f },
             { "909 Punch",          2, 54, 4.5f, 0.022f, 0.15f,0.02f,  0.16f, 0.4f,  0.55f, 0, 0.7f,  0.3f,  0.2f,  0.1f,  200, 0, 0.2f,  0.0f },
             { "909 Distorted",      2, 55, 5.0f, 0.02f,  0.1f, 0.03f,  0.2f,  0.85f, 0.5f,  0, 0.8f,  0.25f, 0.2f,  0.2f,  210, 0, 0.3f,  0.0f },
-            { "Burial Muffle",      0, 50, 2.5f, 0.03f,  0.3f, 0.0f,   0.14f, 0.15f, 0.1f,  1, 0.15f, 0.4f,  0.25f, 0.0f,  180, 0, 0.1f,  0.1f , 0.3f, 0.6f },
-            { "Dub Techno Rumble",  0, 48, 3.2f, 0.03f,  0.2f, 0.02f,  0.18f, 0.3f,  0.3f,  0, 0.4f,  0.5f,  0.35f, 0.1f,  190, 0, 0.5f,  0.6f },
+            { "Burial Muffle",      0, 50, 2.5f, 0.03f,  0.2f, 0.0f,   0.14f, 0.15f, 0.1f,  1, 0.15f, 0.4f,  0.18f, 0.0f,  180, 0, 0.1f,  0.1f , 0.3f, 0.6f },
+            { "Dub Techno Rumble",  0, 48, 3.2f, 0.03f,  0.15f,0.02f,  0.18f, 0.3f,  0.3f,  0, 0.4f,  0.5f,  0.25f, 0.1f,  190, 0, 0.5f,  0.6f },
             { "Berlin Knock",       2, 50, 4.0f, 0.02f,  0.1f, 0.02f,  0.14f, 0.55f, 0.4f,  2, 0.6f,  0.35f, 0.25f, 0.7f,  230, 0, 0.35f, 0.35f },
-            { "Minimal Click",      0, 58, 3.0f, 0.015f, 0.1f, 0.0f,   0.08f, 0.2f,  0.7f,  2, 0.9f,  0.15f, 0.1f,  0.2f,  260, 1, 0.1f,  0.0f , 0.1f, 0.15f },
-            { "Funk Break",         1, 62, 2.6f, 0.02f,  0.2f, 0.01f,  0.11f, 0.35f, 0.5f,  1, 0.5f,  0.2f,  0.12f, 0.3f,  150, 0, 0.0f,  0.0f , 0.45f, 0.45f },
-            { "Lo-Fi Boom Bap",     0, 55, 2.2f, 0.035f, 0.4f, 0.02f,  0.2f,  0.6f,  0.25f, 0, 0.3f,  0.3f,  0.3f,  0.0f,  180, 0, 0.1f,  0.0f , 0.4f, 0.5f },
-            { "Deep House",         0, 50, 3.0f, 0.03f,  0.25f,0.02f,  0.2f,  0.15f, 0.25f, 1, 0.4f,  0.5f,  0.3f,  0.0f,  180, 0, 0.25f, 0.0f , 0.15f, 0.3f },
+            { "Minimal Tight",      0, 54, 3.4f, 0.016f, 0.05f,0.005f, 0.11f, 0.25f, 0.55f, 2, 0.85f, 0.3f,  0.12f, 0.25f, 240, 2, 0.1f,  0.0f , 0.15f, 0.15f },
+            { "Break Kick",         0, 58, 2.6f, 0.018f, 0.05f,0.01f,  0.09f, 0.3f,  0.3f,  1, 0.45f, 0.3f,  0.1f,  0.35f, 160, 0, 0.0f,  0.0f , 0.7f, 0.55f },
+            { "Lo-Fi Boom Bap",     0, 55, 2.2f, 0.03f,  0.15f,0.02f,  0.16f, 0.6f,  0.25f, 0, 0.3f,  0.3f,  0.2f,  0.0f,  180, 0, 0.1f,  0.0f , 0.4f, 0.5f },
+            { "Deep House",         0, 50, 3.0f, 0.028f, 0.1f, 0.02f,  0.17f, 0.15f, 0.25f, 1, 0.4f,  0.5f,  0.22f, 0.0f,  180, 0, 0.25f, 0.0f , 0.15f, 0.3f },
             { "Hard Techno",        2, 52, 6.0f, 0.025f, 0.1f, 0.04f,  0.25f, 1.0f,  0.6f,  0, 0.9f,  0.35f, 0.3f,  0.4f,  220, 3, 0.6f,  0.5f , 0.1f, 0.15f },
-            { "Sub Drop",           0, 40, 3.0f, 0.2f,   1.0f, 0.02f,  0.6f,  0.1f,  0.15f, 2, 0.5f,  0.9f,  1.0f,  0.0f,  180, 0, 0.3f,  0.0f , 0.0f, 0.1f },
-            { "Tight Pop",          2, 60, 3.4f, 0.015f, 0.1f, 0.01f,  0.07f, 0.3f,  0.6f,  1, 0.8f,  0.2f,  0.08f, 0.0f,  180, 1, 0.0f,  0.0f },
-            { "Zap Kick",           1, 55, 9.0f, 0.04f,  0.6f, 0.0f,   0.12f, 0.3f,  0.2f,  2, 0.5f,  0.4f,  0.2f,  0.0f,  180, 0, 0.1f,  0.0f , 0.05f, 0.1f },
+            { "DnB Punch",          2, 56, 4.0f, 0.016f, 0.05f,0.008f, 0.10f, 0.45f, 0.6f,  1, 0.75f, 0.25f, 0.12f, 0.35f, 210, 2, 0.2f,  0.0f , 0.3f, 0.2f },
+            { "Jungle Boom",        0, 47, 2.6f, 0.03f,  0.1f, 0.01f,  0.24f, 0.15f, 0.3f,  0, 0.6f,  0.7f,  0.32f, 0.1f,  180, 0, 0.25f, 0.0f , 0.25f, 0.3f },
+            { "Acoustic Kick",      0, 60, 2.0f, 0.02f,  0.05f,0.0f,   0.06f, 0.0f,  0.0f,  1, 0.4f,  0.35f, 0.12f, 0.0f,  180, 0, 0.1f,  0.0f , 1.0f, 0.5f },
         };
         return k;
     }
@@ -190,11 +222,13 @@ namespace sounds
             { "Untrue Foley",   "Burial Muffle",     { "Rainy Snare", "Lighter Flick", "Foley Knock", "Shuffle Tick", "Dusty Open Hat", "Keys Jangle", "Rattle" } },
             { "909 Techno",     "909 Punch",         { "909 Snare", "909 Clap", "909 Rim", "909 Hat", "909 Open Hat", "909 Tom", "Cabasa" } },
             { "Dub Techno",     "Dub Techno Rumble", { "Noise Snare", "Tight Clap", "Click", "Tick Hat", "Ride", "Clank", "Shaker" } },
-            { "Funk Breaks",    "Funk Break",        { "Rimshot Snare", "Finger Snap", "Woodblock", "Dusty Hat", "909 Open Hat", "Bongo", "Tambourine" } },
-            { "Minimal Clicks", "Minimal Click",     { "Rimshot Snare", "Finger Snap", "Click", "Tick Hat", "Garage Open Hat", "FM Bell", "Cabasa" } },
+            { "Funk Breaks",    "Break Kick",        { "Rimshot Snare", "Finger Snap", "Woodblock", "Dusty Hat", "909 Open Hat", "Bongo", "Tambourine" } },
+            { "Minimal Clicks", "Minimal Tight",     { "Rimshot Snare", "Finger Snap", "Click", "Tick Hat", "Garage Open Hat", "FM Bell", "Cabasa" } },
             { "Lo-Fi Boom Bap", "Lo-Fi Boom Bap",    { "Brush", "808 Clap", "Stick", "Dusty Hat", "808 Open Hat", "Low Conga", "Egg Shaker" } },
             { "Electro Zap",    "808 Long",          { "808 Snare", "909 Clap", "Blip", "FM Hat", "808 Open Hat", "Laser Zap", "Agogo" } },
-            { "Real Room Breaks", "Lo-Fi Boom Bap",  { "Real Snare", "Real Rimshot", "Real Cross Stick", "Real Closed Hat", "Real Half Hat", "Real Conga", "Real Shaker" } },
+            { "Real Room Breaks", "Acoustic Kick",   { "Real Snare", "Real Rimshot", "Real Cross Stick", "Real Closed Hat", "Real Half Hat", "Conga Open", "Real Shaker", "Studio Tom" } },
+            { "Drum & Bass",    "DnB Punch",         { "DnB Snare", "Tight Clap", "Side Stick", "Real Closed Hat", "Garage Open Hat", "Conga Mute", "Shaker", "Studio Tom", "Crash" } },
+            { "Jungle",         "Jungle Boom",       { "Break Snare", "Real Rimshot", "Stick Shot", "Dusty Hat", "Real Open Hat", "Bongo Low", "Tambourine", "Studio Tom", "Crash" } },
             { "Hard Warehouse", "Hard Techno",       { "909 Snare", "Big Room Clap", "909 Rim", "909 Hat", "Ride", "Clank", "Tambourine" } },
         };
         return k;
