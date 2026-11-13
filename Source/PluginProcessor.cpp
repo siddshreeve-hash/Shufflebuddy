@@ -807,7 +807,7 @@ void ShuffleBuddyProcessor::setStateInformation (const void* data, int size)
         {
             const auto str = pat->getStringAttribute ("s" + juce::String (s));
             if (str.length() == NumPads * groove::numSteps)
-                for (int i = 0; i < str.length(); ++i) setCell (s, i / groove::numSteps, i % groove::numSteps, (juce::uint8) juce::jlimit (0, 3, str[i] - '0'));
+                for (int i = 0; i < str.length(); ++i) setCell (s, i / groove::numSteps, i % groove::numSteps, (juce::uint8) juce::jlimit (0, 3, (int) (str[i] - '0')));
         }
         xml->removeChildElement (pat, true);
     }
