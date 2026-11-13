@@ -23,7 +23,7 @@ juce_add_plugin(ShuffleBuddy
     PRODUCT_NAME "Shuffle Buddy"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
-    NEEDS_MIDI_OUTPUT FALSE
+    NEEDS_MIDI_OUTPUT TRUE
     COPY_PLUGIN_AFTER_BUILD FALSE)
 
 target_sources(ShuffleBuddy PRIVATE Source/PluginProcessor.cpp Source/PluginEditor.cpp)

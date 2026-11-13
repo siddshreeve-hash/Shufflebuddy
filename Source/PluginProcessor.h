@@ -107,11 +107,30 @@ public:
     double tempoNow() const { return bpmNow; }
 
     void pushUndo (int slot);
+private:
+    void recordHit (int pad, int alt, float vel, double pos);
+    std::atomic<bool> patRec { false };
+    std::atomic<int> patVersion { 0 };
+    std::array<std::atomic<bool>, NumPads> pendingRec {}, uiHeld {};
+    std::array<bool, NumPads> midiHeld {};
+    std::array<double, NumPads> heldFrom {};
+public:
     bool undo();
     bool canUndo() const { return ! history.empty(); }
     void copySlot (int from, int to);
 
     void auditionPad (int pad, float vel) { pendingAudition[(size_t) pad].store (vel); }
+    // ---- your own parts: REC PATTERN (play pads, it writes them into the pattern) and MIDI clip import
+    void padDown (int pad, float vel) { pendingAudition[(size_t) pad].store (vel); pendingRec[(size_t) pad].store (true); }
+    void setPadHeld (int pad, bool held) { uiHeld[(size_t) pad].store (held); }
+    void setPatternRecord (bool on);
+    bool patternRecording() const { return patRec.load(); }
+    std::atomic<bool> recKeepFeel { true };   // keep how early/late you played (as nudge), not just the step
+    int patternVersion() const { return patVersion.load(); }
+    // drop a .mid on a pattern: notes go to lanes (by the note map, then General MIDI), swing is read and kept as SWING.
+    // Returns bars imported (0 = nothing usable); info says what happened
+    int importMidiFile (const juce::File&, int firstSlot, juce::String& info);
+    int laneForNote (int note, int& alt) const;
     bool loadSample (int pad, const juce::File&);
     void clearSample (int pad);
     juce::String samplePath (int pad) const { auto s = sampleSlots[(size_t) pad]; return s != nullptr ? s->path : juce::String(); }

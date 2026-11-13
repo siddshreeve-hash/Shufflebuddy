@@ -26,6 +26,9 @@ int main (int argc, char** argv)
         else if (k == "rec") { recPath = v; }
         else if (k == "cellx") { auto t = juce::StringArray::fromTokens (v, ",", ""); auto c = proc.cellData (0, t[0].getIntValue(), t[1].getIntValue()); c.ratchet = (juce::uint8) t[2].getIntValue(); c.nudge = (juce::int8) t[3].getIntValue(); c.prob = (juce::uint8) t[4].getIntValue(); proc.setCellData (0, t[0].getIntValue(), t[1].getIntValue(), c); }
         else if (k == "notemap") proc.applyNoteMap (v.getIntValue());
+        else if (k == "import") { juce::String info; auto t = juce::StringArray::fromTokens (v, ",", ""); const int b = proc.importMidiFile (juce::File (t[0]), t.size() > 1 ? t[1].getIntValue() : 0, info); std::cout << "import: " << b << " bars, " << info << "\n"; }
+        else if (k == "clear") for (int sl = 0; sl < 4; ++sl) for (int pd = 0; pd < NumPads; ++pd) for (int st = 0; st < 16; ++st) proc.setCellData (sl, pd, st, {});
+        else if (k == "recpattern") proc.setPatternRecord (true);
         else if (k == "tomrow")   // 16 chars: F L M H = floor/low/mid/high tom, '.' = rest
             for (int st = 0; st < juce::jmin (16, v.length()); ++st)
             {
@@ -43,10 +46,11 @@ int main (int argc, char** argv)
         else if (k == "tail") tailSec = v.getDoubleValue();
         else if (k == "grid" && v.length() == NumPads * 16)
             for (int i = 0; i < v.length(); ++i) proc.setCell (proc.currentSlot(), i / 16, i % 16, (juce::uint8) (v[i] - '0'));
-        else if (k != "style" && k != "log" && k != "chainlog" && k != "midi" && k != "rec" && k != "cellx" && k != "genre" && k != "tomrow" && k != "notemap" && k != "pack" && k != "playmid") set (k, v.getFloatValue());
+        else if (k != "style" && k != "log" && k != "chainlog" && k != "midi" && k != "rec" && k != "cellx" && k != "genre" && k != "tomrow" && k != "notemap" && k != "pack" && k != "playmid" && k != "import" && k != "clear" && k != "recpattern" && k != "dumpgrid") set (k, v.getFloatValue());
     }
     juce::String playMid, packPath; for (auto& [k, v] : kv) { if (k == "playmid") playMid = v; if (k == "pack") packPath = v; }
-    set ("play", playMid.isEmpty() ? 1.0f : 0.0f);
+    bool recPat = false; for (auto& [k, v] : kv) if (k == "recpattern") recPat = true;
+    set ("play", playMid.isEmpty() || recPat ? 1.0f : 0.0f);
     proc.prepareToPlay (sr, bs);
     std::vector<std::pair<int, juce::MidiMessage>> feed;   // playmid=<file>: play a printed clip through the kit (as Live would)
     if (playMid.isNotEmpty())
@@ -86,6 +90,21 @@ int main (int argc, char** argv)
     std::cout << "plugin MIDI out: " << midiOutNotes << " note-ons\n";
     if (recPath.isNotEmpty()) { proc.stopRecording(); std::cout << "recorded " << proc.recordedBars() << " bars, " << proc.recordedSequence().getNumEvents() / 2 << " notes\n"; ShuffleBuddyProcessor::writeMidiFile (proc.recordedSequence(), 132, juce::File (recPath)); }
     if (midiPath.isNotEmpty()) { auto seq = proc.printBars (8); std::cout << "printed " << seq.getNumEvents() / 2 << " notes -> " << (ShuffleBuddyProcessor::writeMidiFile (seq, proc.tempoNow() > 0 ? proc.apvts.getRawParameterValue ("tempo")->load() : 120, juce::File (midiPath)) ? midiPath : juce::String ("FAILED")) << "\n"; }
+    for (auto& [k, v] : kv) if (k == "dumpgrid")
+        for (int sl = 0; sl < 4; ++sl)
+        {
+            std::cout << "slot " << (char) ('A' + sl) << "\n";
+            for (int pd = 0; pd < NumPads; ++pd)
+            {
+                std::cout << "  " << juce::String (ShuffleBuddyProcessor::padName (pd)).paddedRight (' ', 7) << " ";
+                for (int st = 0; st < 16; ++st)
+                {
+                    const auto c = proc.cellData (sl, pd, st);
+                    std::cout << (! c.on() ? "  .  " : (juce::String (c.vel).paddedLeft (' ', 3) + (c.ratchet > 1 ? juce::String ("x") + juce::String (c.ratchet) : (pd == Toms ? juce::String::charToString ((juce::juce_wchar) "FLMH"[c.alt]) + " " : juce::String (c.nudge != 0 ? (c.nudge > 0 ? "+" : "-") : " ") + " "))).substring (0, 5));
+                }
+                std::cout << "\n";
+            }
+        }
     if (packPath.isNotEmpty()) for (auto& pf : proc.printPack (juce::File (packPath))) std::cout << "pack: " << pf.getFullPathName() << "\n";
     juce::File f (argv[1]); f.deleteFile();
     juce::WavAudioFormat wav;

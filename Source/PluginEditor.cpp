@@ -1041,6 +1041,10 @@ GrooveLab::GrooveLab (ShuffleBuddyProcessor& p, LcdDisplay& l) : proc (p), lcd (
         mapBtns[i].onClick = [this, i] { if (i < 2) proc.applyNoteMap (i); else proc.setParamValue ("notemap", 2.0f); lcd.flash ("NOTE MAP", mapBtns[i].getButtonText()); };
         addAndMakeVisible (mapBtns[i]);
     }
+    soundBtn.setName ("slot"); soundBtn.setWantsKeyboardFocus (false);
+    soundBtn.setTooltip ("OFF = MIDI only: Shuffle Buddy makes no sound and just drives your Drum Rack (with MIDI OUT on)");
+    soundBtn.onClick = [this] { proc.setParamValue ("sound", proc.apvts.getRawParameterValue ("sound")->load() > 0.5f ? 0.0f : 1.0f); };
+    addAndMakeVisible (soundBtn);
     for (int i = 0; i < NumPads; ++i)
     {
         laneBtns[i].setName ("slot"); laneBtns[i].setWantsKeyboardFocus (false);
@@ -1107,6 +1111,10 @@ void GrooveLab::noteMenu (int lane)
 
 void GrooveLab::refresh()
 {
+    const bool snd = proc.apvts.getRawParameterValue ("sound")->load() > 0.5f;
+    soundBtn.setButtonText (snd ? "KIT SOUND: ON" : "MIDI ONLY");
+    soundBtn.setColour (juce::TextButton::buttonColourId, snd ? juce::Colour (0xff3a3f52) : toy::orange);
+    soundBtn.setColour (juce::TextButton::textColourOffId, snd ? toy::cream : juce::Colours::white);
     const int map = (int) proc.apvts.getRawParameterValue ("notemap")->load();
     if (map != lastMap)
     {
@@ -1151,7 +1159,8 @@ void GrooveLab::resized()
         knobs[i].name->setBounds (x, 20, 110, 16);
         knobs[i].s->setBounds (x + 10, 34, 90, 92);
     }
-    for (int i = 0; i < 3; ++i) mapBtns[i].setBounds (300 + i * 152, 28, 146, 32);
+    for (int i = 0; i < 3; ++i) mapBtns[i].setBounds (300 + i * 112, 28, 108, 32);
+    soundBtn.setBounds (638, 28, 116, 32);
     for (int i = 0; i < NumPads; ++i) laneBtns[i].setBounds (300 + (i % 5) * 91, 66 + (i / 5) * 36, 87, 31);
     packBtn.setBounds (790, 28, 176, 48);
     folderBtn.setBounds (974, 28, 170, 48);
@@ -1390,6 +1399,26 @@ ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
     }
     deckTab.setTooltip ("Echo, space, filter, squash and THROW: the sound of the kit");
     labTab.setTooltip ("Feel, drift, note map for Ableton's Drum Rack, and PRINT PACK");
+    // REC PATTERN: play the pads (keys 1-0, a controller, a Live clip) and it writes them into the pattern
+    recPatBtn.setName ("slot"); recPatBtn.setWantsKeyboardFocus (false);
+    recPatBtn.setTooltip ("Play pads with keys 1-0 (SHIFT = accent, ALT = ghost), a MIDI controller or a Live clip: every hit is written into the pattern as it loops. Hold a pad to wipe that drum. CTRL+Z undoes the take. Tip: drop a .mid onto the grid or A-D to import a clip");
+    recPatBtn.onClick = [this]
+    {
+        const bool on = ! proc.patternRecording();
+        proc.setPatternRecord (on);
+        if (on && proc.apvts.getRawParameterValue ("play")->load() < 0.5f) setParam ("play", 1.0f);
+        lcd.flash (on ? "REC PATTERN" : "REC OFF", on ? "PLAY THE PADS: 1-0" : "CTRL+Z UNDOES THE TAKE");
+    };
+    addAndMakeVisible (recPatBtn);
+    keepFeelBtn.setName ("slot"); keepFeelBtn.setWantsKeyboardFocus (false);
+    keepFeelBtn.setToggleState (proc.recKeepFeel.load(), juce::dontSendNotification);
+    keepFeelBtn.setTooltip ("ON: keep how early or late you played each hit (as NUDGE). OFF: snap hard to the step");
+    keepFeelBtn.setColour (juce::TextButton::buttonOnColourId, toy::green);
+    keepFeelBtn.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+    keepFeelBtn.setColour (juce::TextButton::buttonColourId, juce::Colours::white);
+    keepFeelBtn.setColour (juce::TextButton::textColourOffId, toy::ink);
+    keepFeelBtn.onClick = [this] { proc.recKeepFeel.store (! proc.recKeepFeel.load()); };
+    addAndMakeVisible (keepFeelBtn);
     deckTab.onClick = [this] { showGrooveLab (false); };
     labTab.onClick = [this] { showGrooveLab (true); };
 
@@ -1586,6 +1615,17 @@ void ShuffleBuddyEditor::setParam (const juce::String& id, float value)
 void ShuffleBuddyEditor::timerCallback()
 {
     if (grooveLab != nullptr && grooveLab->isVisible()) grooveLab->refresh();
+    {
+        const bool rec = proc.patternRecording();
+        const bool blink = rec && (juce::Time::getMillisecondCounter() / 300) % 2 == 0;
+        recPatBtn.setColour (juce::TextButton::buttonColourId, rec ? (blink ? toy::red : juce::Colour (0xffff8a80)) : juce::Colours::white);
+        recPatBtn.setColour (juce::TextButton::textColourOffId, rec ? juce::Colours::white : toy::red);
+        for (int pd = 0; pd < NumPads; ++pd) proc.setPadHeld (pd, rec && juce::KeyPress::isKeyCurrentlyDown (pd == 9 ? '0' : '1' + pd));
+        const bool kf = proc.recKeepFeel.load();
+        keepFeelBtn.setColour (juce::TextButton::buttonColourId, kf ? toy::green : juce::Colours::white);
+        keepFeelBtn.setColour (juce::TextButton::textColourOffId, kf ? juce::Colours::white : toy::ink);
+        if (proc.patternVersion() != lastPatVersion) { lastPatVersion = proc.patternVersion(); grid.repaint(); }
+    }
     // after clicking a knob or button, hand the keyboard back so 1-8, space, T and K keep working
     if (isShowing() && ! hasKeyboardFocus (true))
         if (auto* peer = getPeer())
@@ -1794,7 +1834,15 @@ void ShuffleBuddyEditor::learnMenu (const juce::String& paramId, juce::Component
 bool ShuffleBuddyEditor::keyPressed (const juce::KeyPress& key)
 {
     const auto c = key.getTextCharacter();
-    if ((c >= '1' && c <= '9') || c == '0') { const int pd = c == '0' ? 9 : c - '1'; proc.auditionPad (pd, 0.9f); selectPad (pd); return true; }
+    if ((c >= '1' && c <= '9') || c == '0' || (key.getKeyCode() >= '0' && key.getKeyCode() <= '9'))
+    {
+        const int kc = (c >= '0' && c <= '9') ? c : key.getKeyCode();
+        const int pd = kc == '0' ? 9 : kc - '1';
+        const auto mods = key.getModifiers();
+        proc.padDown (pd, mods.isShiftDown() ? 1.0f : mods.isAltDown() ? 0.32f : 0.75f);
+        if (! proc.patternRecording()) selectPad (pd);
+        return true;
+    }
     if ((key.getModifiers().isCommandDown() || key.getModifiers().isCtrlDown()) && (c == 'z' || c == 'Z' || key.getKeyCode() == 'Z')) { doUndo(); return true; }
     if (c == 'k' || c == 'K') { showLab (lab == nullptr || ! lab->isVisible()); return true; }
     if (c == 't' || c == 'T') { setParam ("throw", 1.0f); juce::Timer::callAfterDelay (700, [this] { setParam ("throw", 0.0f); }); return true; }
@@ -1825,6 +1873,18 @@ void ShuffleBuddyEditor::fileDragExit (const juce::StringArray&)
 void ShuffleBuddyEditor::filesDropped (const juce::StringArray& files, int x, int y)
 {
     fileDragExit (files);
+    if (files.size() > 0 && juce::File (files[0]).hasFileExtension ("mid;midi"))
+    {
+        int slot = -1;
+        for (int i = 0; i < 4; ++i) if (slotBtns[i].getBounds().contains (x, y)) slot = i;
+        if (slot < 0 && grid.getBounds().contains (x, y)) slot = proc.viewSlot();
+        if (slot < 0) { lcd.flash ("DROP .MID ON", "THE GRID OR A-D"); return; }
+        juce::String info;
+        const int bars = proc.importMidiFile (juce::File (files[0]), slot, info);
+        lcd.flash (bars > 0 ? "IMPORTED TO " + juce::String::charToString ((juce::juce_wchar) ('A' + slot)) : "IMPORT FAILED", info);
+        grid.repaint();
+        return;
+    }
     for (int i = 0; i < NumPads; ++i)
         if (pads[(size_t) i]->getBounds().contains (x, y) && files.size() > 0)
         {
@@ -1905,6 +1965,8 @@ void ShuffleBuddyEditor::resized()
     grMeter.setBounds (830, dy + 22, 20, 104);
     throwBtn.setBounds (884, dy - 2, 310, 134);
     hint.setBounds (40, 972, 1180, 18);
+    recPatBtn.setBounds (968, 144, 124, 28);
+    keepFeelBtn.setBounds (1096, 144, 92, 28);
     deckTab.setBounds (66, 796, 130, 26);
     labTab.setBounds (202, 796, 226, 26);
     grooveLab->setBounds (48, 824, 1164, 142);

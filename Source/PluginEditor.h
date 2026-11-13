@@ -138,7 +138,7 @@ private:
     ShuffleBuddyProcessor& proc;
     LcdDisplay& lcd;
     std::vector<Knob> knobs;
-    juce::TextButton mapBtns[3], laneBtns[NumPads], packBtn { "PRINT PACK" }, folderBtn { "OPEN FOLDER" };
+    juce::TextButton mapBtns[3], soundBtn, laneBtns[NumPads], packBtn { "PRINT PACK" }, folderBtn { "OPEN FOLDER" };
     PackDragChip chip;
     juce::File lastPack;
     int lastMap = -1;
@@ -255,6 +255,8 @@ private:
     std::unique_ptr<KickLab> lab;
     std::unique_ptr<GrooveLab> grooveLab;
     juce::TextButton deckTab { "DUB DECK" }, labTab { "GROOVE LAB + ABLETON" };
+    juce::TextButton recPatBtn { "REC PATTERN" }, keepFeelBtn { "KEEP FEEL" };
+    int lastPatVersion = -1;
     int lastMapVersion = -1, lastLearn = -2;
     juce::Label padEditLabel, tempoLabel, hint;
     juce::Image backdrop;
