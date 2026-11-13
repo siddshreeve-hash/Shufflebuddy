@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_core/juce_core.h>
 #include "DrumVoices.h"
+#include "GenreBank.h"
 #include <array>
 
 // Patterns: 4 slots x 10 lanes x 16 steps. Each step holds velocity, chance, nudge, ratchet and (toms) pitch.
@@ -11,68 +12,47 @@
 namespace groove
 {
     constexpr int numSlots = 4, numSteps = 16;
-    enum Style { TwoStep, Burial, Funk, Breaks, NumStyles };
+    // Styles = the genre bank (tools/genres.py -> GenreBank.h): each has a feel, four hand-written variations
+    // that make a 4-bar phrase, and fill preferences. ROLL / VARY learn their odds from those four variations.
+    constexpr int NumStyles = genres::count;
+    inline const char* styleName (int s) { return genres::all()[juce::jlimit (0, NumStyles - 1, s)].name; }
+    inline const genres::Genre& genre (int s) { return genres::all()[juce::jlimit (0, NumStyles - 1, s)]; }
 
-    inline const char* styleName (int s) { static const char* n[] = { "UK GARAGE 2-STEP", "BURIAL", "FUNK", "BREAKS" }; return n[juce::jlimit (0, 3, s)]; }
-
-    // per-style defaults: tempo, swing %, ghosts, loosen, dust, push ms per drum
     struct StyleFeel { float tempo, swing, ghosts, loosen, dust; float push[NumPads]; };
-    inline const StyleFeel& feel (int s)
+    inline StyleFeel feel (int s)
     {
-        static const StyleFeel f[NumStyles] = {
-            // kick snare clap  rim   hat  open perc shaker
-            { 132.0f, 58.0f, 0.40f, 0.15f, 0.10f, { 0.0f, 6.0f, 9.0f, -4.0f, 3.0f, 0.0f, -2.0f, 5.0f } },
-            { 138.0f, 54.0f, 0.35f, 0.45f, 0.55f, { 0.0f, 18.0f, 22.0f, 6.0f, 8.0f, 4.0f, 10.0f, 12.0f } },
-            { 100.0f, 57.0f, 0.60f, 0.12f, 0.05f, { 0.0f, 4.0f, 0.0f, -3.0f, -2.0f, 0.0f, 5.0f, 0.0f } },
-            { 168.0f, 53.0f, 0.45f, 0.10f, 0.08f, { 0.0f, -3.0f, 0.0f, 0.0f, 2.0f, 0.0f, 0.0f, 0.0f } },
-        };
-        return f[juce::jlimit (0, 3, s)];
+        const auto& g = genre (s);
+        StyleFeel f { g.tempo, g.swing, g.ghosts, g.loosen, g.dust, {} };
+        for (int i = 0; i < NumPads; ++i) f.push[i] = g.push[i];
+        return f;
     }
 
-    // Template strings, 16 chars each. prob: '.'=0, '1'..'9' = 10..90 %, 'X' = always. lvl: '1'..'3'.
+    // ROLL / VARY odds per step, learned from the genre's four variations: in all four = always, in none = never
     struct Tpl { const char* prob; const char* lvl; };
     inline Tpl tpl (int style, int pad)
     {
-        static const Tpl T[NumStyles][8] = {
-            { // 2-STEP: kick on 1 and the skip before 3, never four-to-the-floor; claps on 2 & 4; shuffled hats
-              { "X......2..8..2..", "3......2..2..2.." },
-              { "....X..4....X.33", "....3..1....3.11" },
-              { "....7.......7...", "....2.......2..." },
-              { "..4...5..3...5..", "..1...2..1...2.." },
-              { "8.39.8.98.39.8.9", "2.12.2.12.21.2.1" },
-              { "..8...8...8...8.", "..2...2...2...2." },
-              { "...3......3..2..", "...2......2..1.." },
-              { "7777777777777777", "1111111111111111" } },
-            { // BURIAL: sparse lopsided kicks, late heavy snare, crackly irregular hats
-              { "9.........5..1..", "3.........2..2.." },
-              { "....X..2....X..3", "....3..1....3..1" },
-              { "............5...", "............2..." },
-              { "...3.....3....3.", "...1.....2....1." },
-              { "..5.4.5..4.5.3.5", "..2.1.2..1.2.1.1" },
-              { "......4.......4.", "......2.......2." },
-              { ".....1.....2....", ".....1.....2...." },
-              { "5.5.5.5.5.5.5.5.", "1.1.1.1.1.1.1.1." } },
-            { // FUNK: syncopated kick, backbeat with lots of ghost snares, 16th hats
-              { "X..4..3...7X..2.", "3..2..2...22..2." },
-              { ".4.4X.44.4.4X4.4", ".1.13.11.1.131.1" },
-              { "................", "................" },
-              { "......2.......2.", "......1.......2." },
-              { "X7X7X7X7X7X7X7X.", "2121212121212121" },
-              { "...............4", "...............2" },
-              { ".3....2...3..2..", ".2....1...2..1.." },
-              { "................", "................" } },
-            { // BREAKS: classic chopped-break shapes, not any one record
-              { "X.6.......X5....", "3.2.......22...." },
-              { "....X..5.4..X..5", "....3..2.1..3..1" },
-              { "................", "................" },
-              { "..........2.....", "..........1....." },
-              { "X4X4X4X4X4X4X4X4", "2121212121212121" },
-              { "..............3.", "..............2." },
-              { "......2.....2...", "......1.....1..." },
-              { "................", "................" } },
-        };
-        if (pad >= 8) return { "................", "................" };   // toms + crash come from fills
-        return T[juce::jlimit (0, 3, style)][juce::jlimit (0, 7, pad)];
+        struct Table { char prob[NumStyles][NumPads][17]; char lvl[NumStyles][NumPads][17]; };
+        static const Table T = []
+        {
+            Table t {};
+            auto lvlOf = [] (char c) { return c == '3' ? 3 : (c == '2' || c == 'x' || c == 'z' || c == 'L' || c == 'M' || c == 'H' || c == 'F') ? 2 : (c == '1' || c == 'y') ? 1 : 0; };
+            for (int st = 0; st < NumStyles; ++st)
+                for (int p = 0; p < NumPads; ++p)
+                {
+                    for (int s = 0; s < 16; ++s)
+                    {
+                        int n = 0, best = 0;
+                        for (int v = 0; v < 4; ++v) { const int l = lvlOf (genres::all()[st].v[v][p][s]); if (l > 0) { ++n; best = juce::jmax (best, l); } }
+                        static const char pc[5] = { '.', '3', '6', '8', 'X' };
+                        t.prob[st][p][s] = pc[n];
+                        t.lvl[st][p][s] = (char) ('0' + juce::jmax (1, best));
+                    }
+                    t.prob[st][p][16] = t.lvl[st][p][16] = 0;
+                }
+            return t;
+        }();
+        const int st = juce::jlimit (0, NumStyles - 1, style), p = juce::jlimit (0, NumPads - 1, pad);
+        return { T.prob[st][p], T.lvl[st][p] };
     }
 
     inline float probAt (const char* s, int i) { const char c = s[i]; return c == 'X' ? 1.0f : (c >= '1' && c <= '9') ? (float) (c - '0') / 10.0f : 0.0f; }
@@ -107,6 +87,28 @@ namespace groove
     {
         Grid g {}; int p = 0;
         for (auto* r : rows) { for (int s = 0; s < numSteps && r[s]; ++s) if (r[s] >= '1' && r[s] <= '3') g[(size_t) p][(size_t) s] = hit (velOfLevel (r[s] - '0')); if (++p >= NumPads) break; }
+        return g;
+    }
+
+    // one of a genre's four hand-written variations as a full pattern (ratchets and tom pitches included)
+    inline Grid genrePattern (int style, int variation)
+    {
+        Grid g {};
+        const auto& gen = genre (style);
+        for (int p = 0; p < NumPads; ++p)
+            for (int s = 0; s < numSteps; ++s)
+            {
+                const char c = gen.v[juce::jlimit (0, 3, variation)][p][s];
+                Cell x;
+                switch (c)
+                {
+                    case '1': x = hit (40); break;   case '2': x = hit (96); break;   case '3': x = hit (127); break;
+                    case 'x': x = hit (96); x.ratchet = 2; break;   case 'y': x = hit (40); x.ratchet = 2; break;   case 'z': x = hit (96); x.ratchet = 3; break;
+                    case 'F': x = hit (100, 0); break; case 'L': x = hit (100, 1); break; case 'M': x = hit (100, 2); break; case 'H': x = hit (100, 3); break;
+                    default: break;
+                }
+                g[(size_t) p][(size_t) s] = x;
+            }
         return g;
     }
 
@@ -148,13 +150,10 @@ namespace groove
 
     inline int pickFill (int style, juce::Random& r)
     {
-        // weights per style: toms, roll, kicks, hats, drop
-        static const float w[NumStyles][5] = { { 0.10f, 0.25f, 0.20f, 0.20f, 0.25f },    // 2-step
-                                               { 0.15f, 0.20f, 0.05f, 0.25f, 0.35f },    // burial
-                                               { 0.30f, 0.35f, 0.20f, 0.15f, 0.00f },    // funk
-                                               { 0.30f, 0.35f, 0.15f, 0.05f, 0.15f } };  // breaks
-        float x = r.nextFloat(); const auto& ww = w[juce::jlimit (0, NumStyles - 1, style)];
-        for (int i = 0; i < 5; ++i) { x -= ww[i]; if (x <= 0.0f) return FillToms + i; }
+        const auto& w = genre (style).fill;   // toms, roll, kicks, hats, drop
+        float total = 0.0f; for (int i = 0; i < 5; ++i) total += w[i];
+        float x = r.nextFloat() * juce::jmax (0.001f, total);
+        for (int i = 0; i < 5; ++i) { x -= w[i]; if (x <= 0.0f) return FillToms + i; }
         return FillRoll;
     }
 

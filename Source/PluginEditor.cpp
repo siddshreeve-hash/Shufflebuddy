@@ -198,7 +198,7 @@ void LcdDisplay::paint (juce::Graphics& g)
     const int chain = (int) pv ("chain");
     const juce::String chainTxt = chain == 0 ? juce::String() : (playing ? "PLAYING " + juce::String::charToString ((juce::juce_wchar) ('A' + proc.playingSlot())) : juce::String ("CHAIN ") + proc.apvts.getParameter ("chain")->getCurrentValueAsText());
     line (24.0f, "PATTERN " + juce::String::charToString ((juce::juce_wchar) ('A' + slot)), chainTxt.isNotEmpty() ? chainTxt : juce::String (juce::roundToInt (pv ("tempo"))) + " BPM", 26.0f);
-    line (34.0f, groove::styleName ((int) pv ("style")), {}, 34.0f);
+    { const juce::String gn (groove::styleName ((int) pv ("style"))); line (34.0f, gn, {}, gn.length() > 16 ? 26.0f : 34.0f); }
     const bool showPad = selectedPad >= 0 && juce::Time::getMillisecondCounter() - padShownAt < 3000;
     const int learn = proc.learningParam();
     if (learn >= 0 && learn < proc.getParameters().size())
@@ -1046,7 +1046,7 @@ ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
         // section labels
         g.setFont (toy::font (13.0f));
         g.setColour (toy::brown);
-        g.drawText ("PICK A STYLE", 60, 398, 200, 16, juce::Justification::centredLeft);
+        g.drawText ("PICK A GENRE", 60, 398, 200, 16, juce::Justification::centredLeft);
         // tempo window in the header
         g.setColour (toy::ink);  g.fillRoundedRectangle (770, 56, 210, 50, 14);
         g.setColour (toy::bezel); g.fillRoundedRectangle (770, 52, 210, 50, 14);
@@ -1094,20 +1094,48 @@ ShuffleBuddyEditor::ShuffleBuddyEditor (ShuffleBuddyProcessor& p)
         addAndMakeVisible (*pads.back());
     }
 
-    // style buttons: set the feel (tempo, swing, ghosts, loosen, dust, pushes) for that style
-    const char* styles[] = { "2-STEP", "BURIAL", "FUNK", "BREAKS" };
-    const juce::Colour sc[] = { toy::red, toy::purple, toy::green, toy::blue };
+    // GENRE bank: [GENRE menu] [<] [>] [4-BAR PHRASE]
     for (int i = 0; i < 4; ++i)
     {
-        styleBtns[i].setButtonText (styles[i]);
-        styleBtns[i].setName ("style");
-        styleBtns[i].setColour (juce::TextButton::buttonColourId, sc[i]);
-        styleBtns[i].setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        styleBtns[i].setName ("slot");
         styleBtns[i].setWantsKeyboardFocus (false);
-        styleBtns[i].onClick = [this, i] { proc.applyStyleFeel (i); };
-        styleBtns[i].setTooltip ("Sets tempo, swing, ghosts, loosen, dust and push for this style. Then press ROLL.");
+        styleBtns[i].setColour (juce::TextButton::buttonColourId, i == 0 ? toy::purple : juce::Colours::white);
+        styleBtns[i].setColour (juce::TextButton::textColourOffId, i == 0 ? juce::Colours::white : toy::ink);
         addAndMakeVisible (styleBtns[i]);
     }
+    styleBtns[0].setTooltip ("Pick a genre: loads its tempo, swing and feel, and four hand-written bars into patterns A-D (CTRL+Z undoes it)");
+    styleBtns[1].setButtonText ("<"); styleBtns[1].setTooltip ("Previous genre");
+    styleBtns[2].setButtonText (">"); styleBtns[2].setTooltip ("Next genre");
+    styleBtns[3].setButtonText ("4-BAR PHRASE"); styleBtns[3].setTooltip ("Play A, B, C, D one bar each: the genre's four bars as a phrase");
+    auto pickGenre = [this] (int g)
+    {
+        proc.loadGenre ((g + groove::NumStyles) % groove::NumStyles);
+        grid.repaint();
+        lcd.flash (groove::styleName (g < 0 ? groove::NumStyles - 1 : g % groove::NumStyles), "4 BARS LOADED INTO A-D");
+    };
+    styleBtns[0].onClick = [this, pickGenre]
+    {
+        juce::PopupMenu m;
+        const int cur = (int) proc.apvts.getRawParameterValue ("style")->load();
+        juce::StringArray cats;
+        for (int i = 0; i < groove::NumStyles; ++i) cats.addIfNotAlreadyThere (groove::genre (i).cat);
+        for (auto& c : cats)
+        {
+            juce::PopupMenu sub;
+            for (int i = 0; i < groove::NumStyles; ++i)
+                if (c == groove::genre (i).cat)
+                    sub.addItem (i + 1, juce::String (groove::styleName (i)) + "   " + juce::String (juce::roundToInt (groove::genre (i).tempo)) + " BPM", true, i == cur);
+            m.addSubMenu (c, sub);
+        }
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&styleBtns[0]), [pickGenre] (int r) { if (r > 0) pickGenre (r - 1); });
+    };
+    styleBtns[1].onClick = [this, pickGenre] { pickGenre ((int) proc.apvts.getRawParameterValue ("style")->load() - 1); };
+    styleBtns[2].onClick = [this, pickGenre] { pickGenre ((int) proc.apvts.getRawParameterValue ("style")->load() + 1); };
+    styleBtns[3].onClick = [this]
+    {
+        const bool on = (int) proc.apvts.getRawParameterValue ("chain")->load() == 2;
+        setParam ("chain", on ? 0.0f : 2.0f);
+    };
 
     auto setupBtn = [this] (juce::TextButton& b, juce::Colour c, juce::Colour txt, const juce::String& tip)
     {
@@ -1409,7 +1437,12 @@ void ShuffleBuddyEditor::timerCallback()
     if (step != grid.lastStep || ! playing) { grid.lastStep = step; grid.repaint(); }
     lcd.repaint();
     const int style = (int) proc.apvts.getRawParameterValue ("style")->load();
-    for (int i = 0; i < 4; ++i) styleBtns[i].setToggleState (i == style, juce::dontSendNotification);
+    styleBtns[0].setButtonText (juce::String (groove::styleName (style)));
+    {
+        const bool phrase = (int) proc.apvts.getRawParameterValue ("chain")->load() == 2;
+        styleBtns[3].setColour (juce::TextButton::buttonColourId, phrase ? toy::orange : juce::Colours::white);
+        styleBtns[3].setColour (juce::TextButton::textColourOffId, phrase ? juce::Colours::white : toy::ink);
+    }
     const int slot = proc.currentSlot();
     for (int i = 0; i < 4; ++i)
     {
@@ -1662,7 +1695,10 @@ void ShuffleBuddyEditor::resized()
     }
     if (lab != nullptr) lab->setBounds (432, 136, 768, 474);
 
-    for (int i = 0; i < 4; ++i) styleBtns[i].setBounds (60 + (i % 2) * 181, 416 + (i / 2) * 46, 169, 42);
+    styleBtns[0].setBounds (60, 416, 350, 42);
+    styleBtns[1].setBounds (60, 462, 52, 42);
+    styleBtns[2].setBounds (116, 462, 52, 42);
+    styleBtns[3].setBounds (172, 462, 238, 42);
     fillTypeBtn.setBounds (60, 510, 124, 32);
     fillLenBtn.setBounds (188, 510, 76, 32);
     autoFillBtn.setBounds (268, 510, 78, 32);

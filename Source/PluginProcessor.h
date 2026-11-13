@@ -58,6 +58,7 @@ public:
     void varyPattern();
     void clearPattern();
     void applyStyleFeel (int style);
+    void loadGenre (int style);
     int currentSlot() const { return (int) apvts.getRawParameterValue ("slot")->load(); }
     int playingSlot() const { return playSlotNow.load(); }
     // what the grid shows: the playing pattern while CHAIN runs, else the selected one

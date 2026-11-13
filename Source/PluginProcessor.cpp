@@ -27,7 +27,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShuffleBuddyProcessor::creat
     add (new APF ({ "variety", 1 }, "Variety", NR (0.0f, 1.0f), 0.3f, fmt (pct)));
     add (new APF ({ "dust", 1 }, "Dust", NR (0.0f, 1.0f), 0.1f, fmt (pct)));
     add (new APF ({ "master", 1 }, "Volume", NR (-24.0f, 6.0f), -3.0f, fmt ([] (float x) { return juce::String (x, 1) + " dB"; })));
-    add (new juce::AudioParameterChoice ({ "style", 1 }, "Style", juce::StringArray { "2-Step", "Burial", "Funk", "Breaks" }, 0));
+    juce::StringArray genreNames;
+    for (int i = 0; i < groove::NumStyles; ++i) genreNames.add (groove::styleName (i));
+    add (new juce::AudioParameterChoice ({ "style", 1 }, "Genre", genreNames, 0));
     add (new juce::AudioParameterChoice ({ "slot", 1 }, "Pattern", juce::StringArray { "A", "B", "C", "D" }, 0));
     add (new juce::AudioParameterBool ({ "play", 1 }, "Play", false));
     add (new juce::AudioParameterBool ({ "fill", 1 }, "Fill", false));
@@ -133,19 +135,8 @@ ShuffleBuddyProcessor::ShuffleBuddyProcessor()
     engineSeed = (juce::uint32) juce::Random::getSystemRandom().nextInt();
     for (auto& r : playedSrc) for (auto& c : r) c.store (0);
     // starter patterns: one per style, so it grooves the moment you press play
-    juce::Random seed (2026);
-    for (int s = 0; s < groove::numSlots; ++s) setGrid (s, groove::roll (s, seed));
-    // pattern A: a hand-written 2-step to start from (the one on the mockup)
-    const groove::Grid a = groove::fromLevels ({
-        "3.........2.....",    // kick: 1 and the skip before 3
-        "....3..1....3.1.",    // snare
-        "....2.......2...",    // clap
-        "..1....2..1...2.",    // rim
-        "21.121.121.121.1",    // hat
-        "..2...2...2...2.",    // open hat on the off-beats
-        "...2.......2.1..",    // perc
-        "1111111111111111" }); // shaker
-    setGrid (0, a);
+    // start on the first genre's four bars, so it grooves the moment you press play
+    for (int sl = 0; sl < groove::numSlots; ++sl) setGrid (sl, groove::genrePattern (0, sl));
     applyStyleFeel (0);
     startTimer (1000);
 }
@@ -349,6 +340,17 @@ void ShuffleBuddyProcessor::varyPattern()
     auto g = grid (currentSlot());
     groove::vary (g, (int) apvts.getRawParameterValue ("style")->load(), uiRng, 4);
     setGrid (currentSlot(), g);
+}
+
+void ShuffleBuddyProcessor::loadGenre (int style)
+{
+    // the genre's feel + its four hand-written bars into A-D (undoable), ready to CHAIN as a 4-bar phrase
+    for (int sl = groove::numSlots - 1; sl >= 0; --sl) pushUndo (sl);
+    applyStyleFeel (style);
+    for (int v = 0; v < groove::numSlots; ++v) setGrid (v, groove::genrePattern (style, v));
+    const int fl = groove::genre (style).fillLen;
+    setParamValue ("filllen", fl <= 4 ? 0.0f : fl <= 8 ? 1.0f : 2.0f);
+    setParamValue ("slot", 0.0f);
 }
 
 void ShuffleBuddyProcessor::applyStyleFeel (int style)

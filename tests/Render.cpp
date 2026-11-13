@@ -25,6 +25,7 @@ int main (int argc, char** argv)
         else if (k == "midi") { midiPath = v; }
         else if (k == "rec") { recPath = v; }
         else if (k == "cellx") { auto t = juce::StringArray::fromTokens (v, ",", ""); auto c = proc.cellData (0, t[0].getIntValue(), t[1].getIntValue()); c.ratchet = (juce::uint8) t[2].getIntValue(); c.nudge = (juce::int8) t[3].getIntValue(); c.prob = (juce::uint8) t[4].getIntValue(); proc.setCellData (0, t[0].getIntValue(), t[1].getIntValue(), c); }
+        else if (k == "genre") { proc.loadGenre (v.getIntValue()); set ("chain", 2); }
         else if (k == "kick") proc.applyKickPreset (v.getIntValue());
         else if (k == "kit") proc.applyKit (v.getIntValue());
         else if (k == "surprise") { for (int q = 0; q < v.getIntValue(); ++q) proc.surpriseKick(); }
@@ -33,7 +34,7 @@ int main (int argc, char** argv)
         else if (k == "tail") tailSec = v.getDoubleValue();
         else if (k == "grid" && v.length() == NumPads * 16)
             for (int i = 0; i < v.length(); ++i) proc.setCell (proc.currentSlot(), i / 16, i % 16, (juce::uint8) (v[i] - '0'));
-        else if (k != "style" && k != "log" && k != "chainlog" && k != "midi" && k != "rec" && k != "cellx") set (k, v.getFloatValue());
+        else if (k != "style" && k != "log" && k != "chainlog" && k != "midi" && k != "rec" && k != "cellx" && k != "genre") set (k, v.getFloatValue());
     }
     set ("play", 1);
     proc.prepareToPlay (sr, bs);
