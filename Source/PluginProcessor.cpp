@@ -89,7 +89,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShuffleBuddyProcessor::creat
         add (new APF ({ pid ("lswing", i), 1 }, n + " swing", NR (0.0f, 1.5f, 0.05f), 1.0f, fmt (pct)));
         add (new juce::AudioParameterInt ({ pid ("note", i), 1 }, n + " MIDI note", 0, 127, noteDefault[i]));
         add (new APF ({ pid ("room", i), 1 }, n + " room", NR (0.0f, 2.0f), 1.0f, fmt (pct)));
-        add (new APF ({ pid ("lvl", i), 1 }, n + " level", NR (0.0f, 1.0f), 0.8f, fmt (pct)));
+        // mix balance: kick on top, snare + clap well under it (they stack on 2 and 4), hats sitting in
+        static const float lvlDef[NumPads] = { 0.85f, 0.22f, 0.24f, 0.40f, 0.70f, 0.55f, 0.45f, 0.50f, 0.50f, 0.32f };
+        add (new APF ({ pid ("lvl", i), 1 }, n + " level", NR (0.0f, 1.0f), lvlDef[i], fmt (pct)));
         add (new APF ({ pid ("tune", i), 1 }, n + " tune", NR (-12.0f, 12.0f, 0.1f), 0.0f, fmt ([] (float x) { return (x > 0 ? "+" : "") + juce::String (x, 1); })));
         add (new APF ({ pid ("decay", i), 1 }, n + " decay", NR (0.0f, 1.0f), 0.45f, fmt (pct)));
         add (new APF ({ pid ("push", i), 1 }, n + " push", NR (-20.0f, 30.0f, 0.5f), 0.0f,
